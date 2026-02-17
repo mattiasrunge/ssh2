@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Coverage
+coverage/
+coverage_html/
+coverage.lcov
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+lib/
+dist/
+
+# Deno
+deno.lock
+
