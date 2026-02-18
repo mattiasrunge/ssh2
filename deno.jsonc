@@ -1,7 +1,7 @@
 {
   "name": "@ein/ssh2-ts",
-  "version": "0.1.0",
-  "exports": "./src/mod.ts",
+  "version": "0.1.1",
+  "exports": "./mod.ts",
   "description": "ssh2-ts - Fork of ssh2, ssh, sftp",
   "repository": "https://github.com/mattiasrunge/ssh2",
   "license": "MIT",
@@ -26,7 +26,6 @@
     "noUnusedParameters": true
   },
   "imports": {
-    "@std/": "jsr:@std/",
     "@noble/curves": "npm:@noble/curves@1",
     "@noble/ciphers": "npm:@noble/ciphers@1",
     "bcrypt-pbkdf": "npm:bcrypt-pbkdf@1",
@@ -38,7 +37,7 @@
     "coverage:report": "deno coverage coverage/ --include='src/'",
     "coverage:lcov": "deno coverage coverage/ --lcov --output=coverage.lcov",
     "coverage:html": "deno coverage coverage/ --lcov --output=coverage.lcov && genhtml coverage.lcov -o coverage_html",
-    "check": "deno check src/mod.ts",
+    "check": "deno check mod.ts",
     "lint": "deno lint",
     "fmt": "deno fmt"
   },
