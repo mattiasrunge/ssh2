@@ -1490,6 +1490,7 @@ export interface HostKeyConfig {
   passphrase?: string;
 }
 
+/** Accepted forms of a server host key: a path/PEM string, raw bytes, a config object, or a pre-parsed key. */
 export type HostKeyInput = string | Uint8Array | HostKeyConfig | ParsedKey;
 
 /**

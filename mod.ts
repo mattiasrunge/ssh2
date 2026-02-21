@@ -6,40 +6,73 @@
  * @module
  */
 
-// Re-export utilities
-export * from './src/utils/mod.ts';
-
-// Re-export crypto utilities
-export * as crypto from './src/crypto/mod.ts';
-
-// Re-export protocol module
-export * as protocol from './src/protocol/mod.ts';
-
-// Re-export adapters (transport layer)
-export * as adapters from './src/adapters/mod.ts';
-
-// Re-export Channel
-export * from './src/Channel.ts';
-
-// Re-export utilities
-export * from './src/utils.ts';
-
-// Re-export key generation
-export * from './src/keygen.ts';
-
-// Re-export agent
-export * from './src/agent.ts';
-
-// Re-export client
+// ─── Core client / server ────────────────────────────────────────────────────
 export * from './src/client.ts';
-
-// Re-export server
 export * from './src/server.ts';
 
-// Also re-export constants at top level for convenience
-export * from './src/protocol/constants.ts';
+// ─── Key generation ──────────────────────────────────────────────────────────
+export * from './src/keygen.ts';
 
-// Re-export SFTP classes and constants
+// ─── SSH agent ───────────────────────────────────────────────────────────────
+export * from './src/agent.ts';
+
+// ─── Key parsing ─────────────────────────────────────────────────────────────
+export {
+  isParsedKey,
+  isSupportedKeyType,
+  parseDERKey,
+  parseKey,
+} from './src/protocol/keyParser.ts';
+export type { ParsedKey } from './src/protocol/keyParser.ts';
+
+// ─── Channel (public surface only) ───────────────────────────────────────────
+// windowAdjust, MAX_WINDOW, PACKET_SIZE, WINDOW_THRESHOLD are internal.
+export { Channel } from './src/Channel.ts';
+export type {
+  ChannelClient,
+  ChannelEndpoint,
+  ChannelEvents,
+  ChannelInfo,
+  ChannelOptions,
+  ChannelProtocol,
+  ChannelState,
+  ExitInfo,
+  StderrWritable,
+} from './src/Channel.ts';
+
+// ─── Algorithm helpers ───────────────────────────────────────────────────────
+export { generateAlgorithmList } from './src/utils.ts';
+export type { AlgorithmListOptions } from './src/utils.ts';
+
+// ─── Protocol constants (user-facing) ────────────────────────────────────────
+// Intentionally excludes internal details: MESSAGE, COMPAT/COMPAT_CHECKS,
+// CIPHER_INFO/MAC_INFO, DISCONNECT_REASON_BY_VALUE.
+export {
+  CHANNEL_EXTENDED_DATATYPE,
+  CHANNEL_OPEN_FAILURE,
+  curve25519Supported,
+  DEFAULT_CIPHER,
+  DEFAULT_COMPRESSION,
+  DEFAULT_KEX,
+  DEFAULT_MAC,
+  DEFAULT_SERVER_HOST_KEY,
+  DISCONNECT_REASON,
+  eddsaSupported,
+  SIGNALS,
+  SUPPORTED_CIPHER,
+  SUPPORTED_COMPRESSION,
+  SUPPORTED_KEX,
+  SUPPORTED_MAC,
+  SUPPORTED_SERVER_HOST_KEY,
+  TERMINAL_MODE,
+} from './src/protocol/constants.ts';
+export type {
+  ChannelOpenFailure,
+  DisconnectReason,
+  TerminalMode,
+} from './src/protocol/constants.ts';
+
+// ─── SFTP ─────────────────────────────────────────────────────────────────────
 export { SFTP } from './src/protocol/sftp/SFTP.ts';
 export type { SFTPClient } from './src/protocol/sftp/SFTP.ts';
 export type { SFTPConfig } from './src/protocol/sftp/types.ts';
@@ -52,3 +85,7 @@ export type {
   SFTPHandle,
 } from './src/protocol/sftp/types.ts';
 export { ReadStream, WriteStream } from './src/protocol/sftp/streams.ts';
+
+// ─── Namespaced internals (for advanced / low-level use) ─────────────────────
+export * as crypto from './src/crypto/mod.ts';
+export * as adapters from './src/adapters/mod.ts';

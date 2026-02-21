@@ -15,6 +15,7 @@ export const ATTR = {
   EXTENDED: 0x80000000,
 } as const;
 
+/** Numeric SFTP attribute flag value. */
 export type AttrFlag = (typeof ATTR)[keyof typeof ATTR];
 
 /**
@@ -32,6 +33,7 @@ export const STATUS_CODE = {
   OP_UNSUPPORTED: 8,
 } as const;
 
+/** Numeric SFTP status code value. */
 export type StatusCode = (typeof STATUS_CODE)[keyof typeof STATUS_CODE];
 
 /**
@@ -80,6 +82,7 @@ export const REQUEST = {
   EXTENDED: 200,
 } as const;
 
+/** Numeric SFTP request packet type. */
 export type RequestType = (typeof REQUEST)[keyof typeof REQUEST];
 
 /**
@@ -95,6 +98,7 @@ export const RESPONSE = {
   EXTENDED: 201,
 } as const;
 
+/** Numeric SFTP response packet type. */
 export type ResponseType = (typeof RESPONSE)[keyof typeof RESPONSE];
 
 /**
@@ -109,6 +113,7 @@ export const OPEN_MODE = {
   EXCL: 0x00000020,
 } as const;
 
+/** Numeric SFTP file open mode flag. */
 export type OpenModeFlag = (typeof OPEN_MODE)[keyof typeof OPEN_MODE];
 
 /**
@@ -144,11 +149,19 @@ export const DEFAULT_MAX_PKT_LEN = 34000;
 /**
  * File type bits from mode (S_IFMT)
  */
+/** Bitmask to extract the file type bits from a mode value. */
 export const S_IFMT = 0o170000;
-export const S_IFREG = 0o100000; // Regular file
-export const S_IFDIR = 0o040000; // Directory
-export const S_IFCHR = 0o020000; // Character device
-export const S_IFBLK = 0o060000; // Block device
-export const S_IFIFO = 0o010000; // FIFO
-export const S_IFLNK = 0o120000; // Symbolic link
-export const S_IFSOCK = 0o140000; // Socket
+/** File type bit: regular file. */
+export const S_IFREG = 0o100000;
+/** File type bit: directory. */
+export const S_IFDIR = 0o040000;
+/** File type bit: character device. */
+export const S_IFCHR = 0o020000;
+/** File type bit: block device. */
+export const S_IFBLK = 0o060000;
+/** File type bit: FIFO / named pipe. */
+export const S_IFIFO = 0o010000;
+/** File type bit: symbolic link. */
+export const S_IFLNK = 0o120000;
+/** File type bit: socket. */
+export const S_IFSOCK = 0o140000;

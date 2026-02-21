@@ -22,11 +22,15 @@ import {
 import { CIPHER_INFO } from './constants.ts';
 import { makeBufferParser, readString } from './utils.ts';
 
-// Symbols for private key properties (exported for testing)
+/** Symbol key for the hash algorithm property on a parsed key (exported for testing). */
 export const SYM_HASH_ALGO = Symbol('Hash Algorithm');
+/** Symbol key for the private key PEM property on a parsed key (exported for testing). */
 export const SYM_PRIV_PEM = Symbol('Private key PEM');
+/** Symbol key for the public key PEM property on a parsed key (exported for testing). */
 export const SYM_PUB_PEM = Symbol('Public key PEM');
+/** Symbol key for the public key SSH wire-format property on a parsed key (exported for testing). */
 export const SYM_PUB_SSH = Symbol('Public key SSH');
+/** Symbol key indicating whether a parsed key has been decrypted (exported for testing). */
 export const SYM_DECRYPTED = Symbol('Decrypted Key');
 
 /**
@@ -230,6 +234,9 @@ function bigIntToBuffer(bn: bigint): Uint8Array {
   return bytes;
 }
 
+/**
+ * Generate a PKCS#8-wrapped RSA private key in PEM format from raw key components.
+ */
 export function genOpenSSLRSAPriv(
   n: Uint8Array,
   e: Uint8Array,
@@ -306,7 +313,7 @@ function genOpenSSHEdPub(pub: Uint8Array): Uint8Array {
   return publicKey;
 }
 
-// Exported for Ed25519 private key generation
+/** Generate a PKCS#8-wrapped Ed25519 private key in PEM format. */
 export function genOpenSSLEdPriv(priv: Uint8Array): string {
   const asnWriter = new BerWriter();
   asnWriter.startSequence();
@@ -375,7 +382,7 @@ function genOpenSSHECDSAPub(oid: string, Q: Uint8Array): Uint8Array | undefined 
   return publicKey;
 }
 
-// Exported for ECDSA private key generation
+/** Generate a PKCS#8-wrapped ECDSA private key in PEM format from an OID and raw key bytes. */
 export function genOpenSSLECDSAPriv(
   oid: string,
   pub: Uint8Array,

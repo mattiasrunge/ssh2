@@ -30,6 +30,7 @@ export interface Deferred<T> {
   reject: (reason?: unknown) => void;
 }
 
+/** Create a {@link Deferred} promise that can be resolved or rejected externally. */
 export function deferred<T>(): Deferred<T> {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;

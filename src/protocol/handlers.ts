@@ -1219,5 +1219,5 @@ export function createMessageHandlers(): MessageHandler[] {
   return handlers;
 }
 
-// Create and export the message handlers
+/** Indexed array of handler functions for each SSH message type. */
 export const MESSAGE_HANDLERS: MessageHandler[] = createMessageHandlers();

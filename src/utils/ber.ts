@@ -8,7 +8,7 @@
 
 import { allocBytes } from './binary.ts';
 
-// ASN.1 Universal Tags
+/** ASN.1 universal tag constants used when encoding/decoding SSH key structures. */
 export const Ber = {
   EOC: 0x00,
   Boolean: 0x01,
@@ -392,8 +392,9 @@ export class BerWriter {
   }
 }
 
-// Export Reader and Writer classes with legacy names
+/** BER reader class (alias for {@link BerReader}). */
 export const Reader = BerReader;
+/** BER writer class (alias for {@link BerWriter}). */
 export const Writer = BerWriter;
 
 // Also export Ber namespace-style for compatibility

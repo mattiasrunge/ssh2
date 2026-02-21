@@ -124,6 +124,7 @@ export interface NoneAuth {
   username: string;
 }
 
+/** Union type of all supported SSH authentication methods. */
 export type AuthRequest =
   | PasswordAuth
   | PublicKeyAuth

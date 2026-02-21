@@ -61,9 +61,10 @@ export const MESSAGE = {
   CHANNEL_FAILURE: 100,
 } as const;
 
+/** Numeric value of an SSH message type. */
 export type MessageType = (typeof MESSAGE)[keyof typeof MESSAGE];
 
-// Disconnect Reason Codes (RFC 4253 Section 11.1)
+/** Disconnect reason codes as defined in RFC 4253 Section 11.1. */
 export const DISCONNECT_REASON = {
   HOST_NOT_ALLOWED_TO_CONNECT: 1,
   PROTOCOL_ERROR: 2,
@@ -82,14 +83,15 @@ export const DISCONNECT_REASON = {
   ILLEGAL_USER_NAME: 15,
 } as const;
 
+/** Numeric disconnect reason code. */
 export type DisconnectReason = (typeof DISCONNECT_REASON)[keyof typeof DISCONNECT_REASON];
 
-// Create reverse mapping for disconnect reasons
+/** Reverse mapping from disconnect reason code number to name string. */
 export const DISCONNECT_REASON_BY_VALUE: Record<number, string> = Object.fromEntries(
   Object.entries(DISCONNECT_REASON).map(([key, value]) => [value, key]),
 );
 
-// Channel Open Failure Reason Codes (RFC 4254 Section 5.1)
+/** Channel open failure reason codes as defined in RFC 4254 Section 5.1. */
 export const CHANNEL_OPEN_FAILURE = {
   ADMINISTRATIVELY_PROHIBITED: 1,
   CONNECT_FAILED: 2,
@@ -97,9 +99,10 @@ export const CHANNEL_OPEN_FAILURE = {
   RESOURCE_SHORTAGE: 4,
 } as const;
 
+/** Numeric channel open failure reason code. */
 export type ChannelOpenFailure = (typeof CHANNEL_OPEN_FAILURE)[keyof typeof CHANNEL_OPEN_FAILURE];
 
-// Terminal Modes (RFC 4254 Section 8)
+/** Terminal mode opcodes as defined in RFC 4254 Section 8. */
 export const TERMINAL_MODE = {
   TTY_OP_END: 0,
   VINTR: 1,
@@ -160,14 +163,15 @@ export const TERMINAL_MODE = {
   TTY_OP_OSPEED: 129,
 } as const;
 
+/** Numeric terminal mode opcode. */
 export type TerminalMode = (typeof TERMINAL_MODE)[keyof typeof TERMINAL_MODE];
 
-// Channel Extended Data Types (RFC 4254 Section 5.2)
+/** Channel extended data type codes as defined in RFC 4254 Section 5.2. */
 export const CHANNEL_EXTENDED_DATATYPE = {
   STDERR: 1,
 } as const;
 
-// Signals (RFC 4254 Section 6.9)
+/** Signal names supported by the SSH protocol (RFC 4254 Section 6.9). */
 export const SIGNALS: Record<string, number> = {
   ABRT: 1,
   ALRM: 1,
@@ -184,7 +188,7 @@ export const SIGNALS: Record<string, number> = {
   PIPE: 1,
 };
 
-// Compatibility flags for different SSH implementations
+/** Bitmask flags for working around quirks in specific SSH implementations. */
 export const COMPAT = {
   BAD_DHGEX: 1 << 0,
   OLD_EXIT: 1 << 1,
@@ -193,9 +197,10 @@ export const COMPAT = {
   IMPLY_RSA_SHA2_SIGALGS: 1 << 4,
 } as const;
 
+/** A single compatibility bitmask value. */
 export type CompatFlag = (typeof COMPAT)[keyof typeof COMPAT];
 
-// Compatibility checks: [pattern, flags]
+/** Version pattern / compat-flag pairs used to detect known SSH implementation quirks. */
 export const COMPAT_CHECKS: [string | RegExp, number][] = [
   ['Cisco-1.25', COMPAT.BAD_DHGEX],
   [/^Cisco-1[.]/, COMPAT.BUG_DHGEX_LARGE],
@@ -204,7 +209,7 @@ export const COMPAT_CHECKS: [string | RegExp, number][] = [
   [/^OpenSSH_7[.]4/, COMPAT.IMPLY_RSA_SHA2_SIGALGS],
 ];
 
-// Cipher information
+/** Describes the parameters of an SSH cipher algorithm. */
 export interface CipherInfo {
   sslName: string;
   blockLen: number;
@@ -237,6 +242,7 @@ function cipherInfo(
   };
 }
 
+/** Map of SSH cipher name to its {@link CipherInfo} parameters. */
 export const CIPHER_INFO: Record<string, CipherInfo> = {
   'chacha20-poly1305@openssh.com': cipherInfo('chacha20', 8, 64, 0, 16, 0, CIPHER_STREAM),
 
@@ -255,7 +261,7 @@ export const CIPHER_INFO: Record<string, CipherInfo> = {
   'aes256-ctr': cipherInfo('aes-256-ctr', 16, 32, 16, 0, 0, CIPHER_STREAM),
 };
 
-// MAC information
+/** Describes the parameters of an SSH MAC (Message Authentication Code) algorithm. */
 export interface MACInfo {
   sslName: string;
   len: number;
@@ -267,6 +273,7 @@ function macInfo(sslName: string, len: number, actualLen: number, isETM: boolean
   return { sslName, len, actualLen, isETM };
 }
 
+/** Map of SSH MAC algorithm name to its {@link MACInfo} parameters. */
 export const MAC_INFO: Record<string, MACInfo> = {
   'hmac-sha2-256-etm@openssh.com': macInfo('sha256', 32, 32, true),
   'hmac-sha2-512-etm@openssh.com': macInfo('sha512', 64, 64, true),
@@ -279,9 +286,7 @@ export const MAC_INFO: Record<string, MACInfo> = {
   'hmac-sha1-96': macInfo('sha1', 20, 12, false),
 };
 
-// Default and supported algorithm lists
-// Note: These are the algorithms supported with Web Crypto API
-
+/** Default key-exchange algorithms (preferred order, Web Crypto API compatible). */
 export const DEFAULT_KEX = [
   'curve25519-sha256',
   'curve25519-sha256@libssh.org',
@@ -294,6 +299,7 @@ export const DEFAULT_KEX = [
   'diffie-hellman-group18-sha512',
 ];
 
+/** All supported key-exchange algorithms (superset of {@link DEFAULT_KEX}). */
 export const SUPPORTED_KEX = [
   ...DEFAULT_KEX,
   'diffie-hellman-group-exchange-sha1',
@@ -301,6 +307,7 @@ export const SUPPORTED_KEX = [
   'diffie-hellman-group1-sha1',
 ];
 
+/** Default server host key algorithms (preferred order). */
 export const DEFAULT_SERVER_HOST_KEY = [
   'ssh-ed25519',
   'ecdsa-sha2-nistp256',
@@ -311,8 +318,10 @@ export const DEFAULT_SERVER_HOST_KEY = [
   'ssh-rsa',
 ];
 
+/** All supported server host key algorithms. */
 export const SUPPORTED_SERVER_HOST_KEY = [...DEFAULT_SERVER_HOST_KEY];
 
+/** Default cipher algorithms (preferred order). */
 export const DEFAULT_CIPHER = [
   'chacha20-poly1305@openssh.com',
   'aes128-gcm@openssh.com',
@@ -322,6 +331,7 @@ export const DEFAULT_CIPHER = [
   'aes256-ctr',
 ];
 
+/** All supported cipher algorithms (superset of {@link DEFAULT_CIPHER}). */
 export const SUPPORTED_CIPHER = [
   ...DEFAULT_CIPHER,
   'aes256-cbc',
@@ -331,6 +341,7 @@ export const SUPPORTED_CIPHER = [
   'aes256-gcm',
 ];
 
+/** Default MAC algorithms (preferred order). */
 export const DEFAULT_MAC = [
   'hmac-sha2-256-etm@openssh.com',
   'hmac-sha2-512-etm@openssh.com',
@@ -340,6 +351,7 @@ export const DEFAULT_MAC = [
   'hmac-sha1',
 ];
 
+/** All supported MAC algorithms (superset of {@link DEFAULT_MAC}). */
 export const SUPPORTED_MAC = [
   ...DEFAULT_MAC,
   'hmac-sha2-256-96',
@@ -347,14 +359,17 @@ export const SUPPORTED_MAC = [
   'hmac-sha1-96',
 ];
 
+/** Default compression algorithms (preferred order). */
 export const DEFAULT_COMPRESSION = [
   'none',
   'zlib@openssh.com',
   'zlib',
 ];
 
+/** All supported compression algorithms. */
 export const SUPPORTED_COMPRESSION = [...DEFAULT_COMPRESSION];
 
-// Curve25519 and Ed25519 are supported via @noble/curves
+/** Whether Curve25519 key exchange is supported (always true; provided via @noble/curves). */
 export const curve25519Supported = true;
+/** Whether Ed25519 signatures are supported (always true; provided via @noble/curves). */
 export const eddsaSupported = true;
