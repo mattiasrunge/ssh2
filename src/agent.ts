@@ -5,7 +5,8 @@
  * Supports OpenSSH agent communication over Unix sockets.
  */
 
-import { EventEmitter } from './utils/events.ts';
+import { isParsedKey, type ParsedKey, parseKey } from './protocol/keyParser.ts';
+import { makeBufferParser } from './protocol/utils.ts';
 import {
   allocBytes,
   concatBytes,
@@ -13,8 +14,7 @@ import {
   readUInt32BE,
   writeUInt32BE,
 } from './utils/binary.ts';
-import { makeBufferParser } from './protocol/utils.ts';
-import { isParsedKey, type ParsedKey, parseKey } from './protocol/keyParser.ts';
+import { EventEmitter } from './utils/events.ts';
 
 // Agent protocol message types
 const SSH_AGENTC_REQUEST_IDENTITIES = 11;

@@ -9,6 +9,8 @@
  */
 
 import { assertEquals, assertGreater, assertStringIncludes } from '@std/assert';
+import { OpenSSHAgent } from '../src/agent.ts';
+import { Client } from '../src/client.ts';
 import {
   type Connection,
   type PKAuthContext,
@@ -16,13 +18,11 @@ import {
   Server,
   type ServerAuthContext,
 } from '../src/server.ts';
-import { OpenSSHAgent } from '../src/agent.ts';
 import {
   generateTestHostKeyECDSA,
   generateTestHostKeyEd25519,
   generateTestHostKeyRSA,
 } from './integration_helpers.ts';
-import { Client } from '../src/client.ts';
 
 /**
  * Run ssh command and get output

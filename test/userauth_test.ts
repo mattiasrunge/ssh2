@@ -16,6 +16,7 @@
 
 import { assertEquals } from '@std/assert';
 import { Client } from '../src/client.ts';
+import { generateKeyPair } from '../src/keygen.ts';
 import {
   type Connection,
   type HostbasedAuthContext,
@@ -30,7 +31,6 @@ import {
   mustCall,
   verifyMustCallChecks,
 } from './integration_helpers.ts';
-import { generateKeyPair } from '../src/keygen.ts';
 
 const DEBUG = false;
 

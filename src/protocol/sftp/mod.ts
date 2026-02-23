@@ -5,10 +5,6 @@
  */
 
 export * from './constants.ts';
-export * from './types.ts';
-export * from './Stats.ts';
-export * from './SFTP.ts';
-export { ReadStream, WriteStream } from './streams.ts';
 export {
   attrsToBytes,
   getAttrBytes,
@@ -19,3 +15,7 @@ export {
   writeString,
   writeUInt64BE,
 } from './packet.ts';
+export * from './SFTP.ts';
+export * from './Stats.ts';
+export { ReadStream, WriteStream } from './streams.ts';
+export * from './types.ts';

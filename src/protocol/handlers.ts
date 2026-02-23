@@ -9,8 +9,8 @@
 
 import { allocBytes, toUtf8, writeUInt32BE } from '../utils/binary.ts';
 import { CHANNEL_OPEN_FAILURE, COMPAT, MESSAGE, TERMINAL_MODE } from './constants.ts';
-import { doFatalError, type FatalErrorProtocol, makeBufferParser, sigSSHToASN1 } from './utils.ts';
 import { parseKey } from './keyParser.ts';
+import { doFatalError, type FatalErrorProtocol, makeBufferParser, sigSSHToASN1 } from './utils.ts';
 
 // Create reverse mapping for terminal modes
 const TERMINAL_MODE_BY_VALUE: Record<number, string> = {};

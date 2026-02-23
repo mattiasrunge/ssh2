@@ -332,7 +332,9 @@ function makeZlibProtocol(kexinit: unknown = undefined) {
   return {
     _kexinit: kexinit,
     _cipher: {
-      allocPacket(size: number) { return allocBytes(size + 5); },
+      allocPacket(size: number) {
+        return allocBytes(size + 5);
+      },
     },
   };
 }

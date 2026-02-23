@@ -10,6 +10,14 @@ import {
   onChannelOpenFailure,
 } from '../src/utils.ts';
 import {
+  deferred,
+  nextTick,
+  nextTickWith,
+  sleep,
+  timeout,
+  withTimeout,
+} from '../src/utils/async.ts';
+import {
   allocBytes,
   compareBytes,
   concatBytes,
@@ -39,14 +47,6 @@ import {
   writeUInt8,
 } from '../src/utils/binary.ts';
 import { EventEmitter, listenerCount } from '../src/utils/events.ts';
-import {
-  deferred,
-  nextTick,
-  nextTickWith,
-  sleep,
-  timeout,
-  withTimeout,
-} from '../src/utils/async.ts';
 
 // Binary utilities tests
 Deno.test('allocBytes creates zero-filled array', () => {
@@ -682,7 +682,9 @@ Deno.test('ChannelManager: cleanup() resets to initial state', () => {
 Deno.test('ChannelManager: cleanup() calls function-type channels with failure', () => {
   const mgr = new ChannelManager();
   const errors: Error[] = [];
-  const cb = (err?: Error) => { if (err) errors.push(err); };
+  const cb = (err?: Error) => {
+    if (err) errors.push(err);
+  };
   mgr.add(cb as any);
   mgr.cleanup(new Error('disconnected'));
   assertEquals(errors.length, 1);
@@ -816,7 +818,9 @@ Deno.test('onChannelOpenFailure: Error instance passed to callback', () => {
   const id = mgr.add();
   const inputErr = new Error('connection refused');
   let cbErr: Error | undefined;
-  onChannelOpenFailure(mgr, id, inputErr, (err) => { cbErr = err; });
+  onChannelOpenFailure(mgr, id, inputErr, (err) => {
+    cbErr = err;
+  });
   assertEquals(cbErr, inputErr);
 });
 
@@ -835,7 +839,9 @@ Deno.test('onChannelOpenFailure: null info creates generic error', () => {
   const mgr = new ChannelManager();
   const id = mgr.add();
   let cbErr: Error | undefined;
-  onChannelOpenFailure(mgr, id, null, (err) => { cbErr = err; });
+  onChannelOpenFailure(mgr, id, null, (err) => {
+    cbErr = err;
+  });
   assertEquals(cbErr?.message.includes('unexpectedly'), true);
 });
 
@@ -859,7 +865,9 @@ Deno.test('onChannelClose: function channel delegates to onChannelOpenFailure', 
   const mgr = new ChannelManager();
   const id = mgr.add();
   let cbCalled = false;
-  onChannelClose(mgr, id, (_err?: Error) => { cbCalled = true; });
+  onChannelClose(mgr, id, (_err?: Error) => {
+    cbCalled = true;
+  });
   assertEquals(cbCalled, true);
 });
 

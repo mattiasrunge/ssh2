@@ -7,20 +7,20 @@
 
 import { assertEquals, assertExists } from '@std/assert';
 
-import { Client } from '../src/client.ts';
-import {
-  type Connection,
-  type PKAuthContext,
-  Server,
-  type ServerAuthContext,
-} from '../src/server.ts';
 import {
   type AgentInboundRequest,
   AgentProtocol,
   BaseAgent,
   type SignOptions,
 } from '../src/agent.ts';
+import { Client } from '../src/client.ts';
 import { type ParsedKey, parseKey } from '../src/protocol/keyParser.ts';
+import {
+  type Connection,
+  type PKAuthContext,
+  Server,
+  type ServerAuthContext,
+} from '../src/server.ts';
 import {
   clearMustCallChecks,
   generateTestHostKeyEd25519,

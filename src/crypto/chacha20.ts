@@ -8,12 +8,12 @@
 
 // Use chacha20orig (DJB format with 8-byte nonce) not chacha20 (IETF format with 12-byte nonce)
 // OpenSSH uses DJB ChaCha20 format
-import { chacha20orig as chacha20 } from '@noble/ciphers/chacha';
 import { poly1305 } from '@noble/ciphers/_poly1305';
-import { randomFill } from './random.ts';
-import { timingSafeEqual } from './utils.ts';
+import { chacha20orig as chacha20 } from '@noble/ciphers/chacha';
 import { allocBytes, readUInt32BE, writeUInt32BE } from '../utils/binary.ts';
 import type { Cipher, CipherConfig, Decipher, DecipherConfig } from './ciphers.ts';
+import { randomFill } from './random.ts';
+import { timingSafeEqual } from './utils.ts';
 
 const MAX_PACKET_SIZE = 35000;
 

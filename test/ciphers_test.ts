@@ -6,8 +6,8 @@
 
 import { assertEquals, assertExists, assertRejects } from '@std/assert';
 import { createCipher, createDecipher, NullCipher, NullDecipher } from '../src/crypto/ciphers.ts';
-import { CIPHER_INFO, MAC_INFO } from '../src/protocol/constants.ts';
 import { randomBytes } from '../src/crypto/random.ts';
+import { CIPHER_INFO, MAC_INFO } from '../src/protocol/constants.ts';
 import { concatBytes } from '../src/utils/binary.ts';
 
 // Test NullCipher (no encryption, used during handshake)
@@ -732,7 +732,9 @@ Deno.test('AES-128-CBC with HMAC-SHA2-256 round-trip', async () => {
   const cipher = createCipher({
     outbound: {
       seqno: 0,
-      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      onWrite: (data) => {
+        ciphered = concatBytes([ciphered, data]);
+      },
       cipherInfo,
       cipherKey,
       cipherIV: ivEnc,
@@ -744,7 +746,9 @@ Deno.test('AES-128-CBC with HMAC-SHA2-256 round-trip', async () => {
   const decipher = createDecipher({
     inbound: {
       seqno: 0,
-      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      onPayload: (payload) => {
+        deciphered.push(new Uint8Array(payload));
+      },
       decipherInfo: cipherInfo,
       decipherKey: cipherKey,
       decipherIV: ivDec,
@@ -782,7 +786,9 @@ Deno.test('AES-256-CBC with HMAC-SHA2-256 round-trip', async () => {
   const cipher = createCipher({
     outbound: {
       seqno: 0,
-      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      onWrite: (data) => {
+        ciphered = concatBytes([ciphered, data]);
+      },
       cipherInfo,
       cipherKey,
       cipherIV: ivEnc,
@@ -794,7 +800,9 @@ Deno.test('AES-256-CBC with HMAC-SHA2-256 round-trip', async () => {
   const decipher = createDecipher({
     inbound: {
       seqno: 0,
-      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      onPayload: (payload) => {
+        deciphered.push(new Uint8Array(payload));
+      },
       decipherInfo: cipherInfo,
       decipherKey: cipherKey,
       decipherIV: ivDec,
@@ -832,7 +840,9 @@ Deno.test('AES-128-CBC multi-packet round-trip (IV chaining)', async () => {
   const cipher = createCipher({
     outbound: {
       seqno: 0,
-      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      onWrite: (data) => {
+        ciphered = concatBytes([ciphered, data]);
+      },
       cipherInfo,
       cipherKey,
       cipherIV: ivEnc,
@@ -844,7 +854,9 @@ Deno.test('AES-128-CBC multi-packet round-trip (IV chaining)', async () => {
   const decipher = createDecipher({
     inbound: {
       seqno: 0,
-      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      onPayload: (payload) => {
+        deciphered.push(new Uint8Array(payload));
+      },
       decipherInfo: cipherInfo,
       decipherKey: cipherKey,
       decipherIV: ivDec,
@@ -892,7 +904,9 @@ Deno.test('AES-128-CBC with HMAC-SHA2-256-ETM round-trip', async () => {
   const cipher = createCipher({
     outbound: {
       seqno: 0,
-      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      onWrite: (data) => {
+        ciphered = concatBytes([ciphered, data]);
+      },
       cipherInfo,
       cipherKey,
       cipherIV: ivEnc,
@@ -904,7 +918,9 @@ Deno.test('AES-128-CBC with HMAC-SHA2-256-ETM round-trip', async () => {
   const decipher = createDecipher({
     inbound: {
       seqno: 0,
-      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      onPayload: (payload) => {
+        deciphered.push(new Uint8Array(payload));
+      },
       decipherInfo: cipherInfo,
       decipherKey: cipherKey,
       decipherIV: ivDec,
@@ -946,7 +962,9 @@ Deno.test('AES-128-CTR with HMAC-SHA2-256-ETM round-trip', async () => {
   const cipher = createCipher({
     outbound: {
       seqno: 0,
-      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      onWrite: (data) => {
+        ciphered = concatBytes([ciphered, data]);
+      },
       cipherInfo,
       cipherKey,
       cipherIV: ivEnc,
@@ -958,7 +976,9 @@ Deno.test('AES-128-CTR with HMAC-SHA2-256-ETM round-trip', async () => {
   const decipher = createDecipher({
     inbound: {
       seqno: 0,
-      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      onPayload: (payload) => {
+        deciphered.push(new Uint8Array(payload));
+      },
       decipherInfo: cipherInfo,
       decipherKey: cipherKey,
       decipherIV: ivDec,
@@ -987,7 +1007,9 @@ Deno.test('AES-128-CTR with HMAC-SHA2-256-ETM round-trip', async () => {
 
 Deno.test('NullCipher: encrypt after free() is a no-op (dead check)', async () => {
   let written = 0;
-  const cipher = new NullCipher(0, (_data) => { written++; });
+  const cipher = new NullCipher(0, (_data) => {
+    written++;
+  });
   const packet = cipher.allocPacket(4);
   cipher.free(); // sets _dead = true
   await cipher.encrypt(packet); // should return immediately without writing
@@ -1002,8 +1024,12 @@ Deno.test('NullDecipher: packet split across multiple decrypt() calls', async ()
   const payloads: Uint8Array[] = [];
   let ciphered: Uint8Array = new Uint8Array(0);
 
-  const cipher = new NullCipher(0, (data) => { ciphered = concatBytes([ciphered, data]); });
-  const decipher = new NullDecipher(0, (p) => { payloads.push(new Uint8Array(p)); });
+  const cipher = new NullCipher(0, (data) => {
+    ciphered = concatBytes([ciphered, data]);
+  });
+  const decipher = new NullDecipher(0, (p) => {
+    payloads.push(new Uint8Array(p));
+  });
 
   const payload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
   const packet = cipher.allocPacket(payload.length);
@@ -1026,8 +1052,12 @@ Deno.test('NullDecipher: two packets fed incrementally', async () => {
   const payloads: Uint8Array[] = [];
   let ciphered: Uint8Array = new Uint8Array(0);
 
-  const cipher = new NullCipher(0, (data) => { ciphered = concatBytes([ciphered, data]); });
-  const decipher = new NullDecipher(0, (p) => { payloads.push(new Uint8Array(p)); });
+  const cipher = new NullCipher(0, (data) => {
+    ciphered = concatBytes([ciphered, data]);
+  });
+  const decipher = new NullDecipher(0, (p) => {
+    payloads.push(new Uint8Array(p));
+  });
 
   // Encrypt two separate packets
   const p1 = cipher.allocPacket(4);
@@ -1069,7 +1099,9 @@ Deno.test('AES-192-CTR with HMAC-SHA2-256 round-trip', async () => {
   const cipher = createCipher({
     outbound: {
       seqno: 0,
-      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      onWrite: (data) => {
+        ciphered = concatBytes([ciphered, data]);
+      },
       cipherInfo,
       cipherKey,
       cipherIV: ivEnc,
@@ -1081,7 +1113,9 @@ Deno.test('AES-192-CTR with HMAC-SHA2-256 round-trip', async () => {
   const decipher = createDecipher({
     inbound: {
       seqno: 0,
-      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      onPayload: (payload) => {
+        deciphered.push(new Uint8Array(payload));
+      },
       decipherInfo: cipherInfo,
       decipherKey: cipherKey,
       decipherIV: ivDec,

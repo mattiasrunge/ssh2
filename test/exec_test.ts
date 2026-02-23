@@ -6,17 +6,15 @@
  */
 
 import { assertEquals, assertExists, assertThrows } from '@std/assert';
-
+import type { Channel, StderrWritable } from '../src/Channel.ts';
 import { Client } from '../src/client.ts';
 import { type Connection, Server, type ServerAuthContext, type Session } from '../src/server.ts';
-import type { Channel } from '../src/Channel.ts';
 import {
   clearMustCallChecks,
   generateTestHostKeyEd25519,
   mustCall,
   verifyMustCallChecks,
 } from './integration_helpers.ts';
-import type { StderrWritable } from '../src/Channel.ts';
 
 const DEBUG = false;
 const encoder = new TextEncoder();

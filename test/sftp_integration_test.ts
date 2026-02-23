@@ -1388,15 +1388,21 @@ Deno.test('SFTP: VERSION packet with extensions populates extensions map', async
   // RESPONSE.VERSION = 2
   packet[4] = 2;
   // Version 3
-  packet[5] = 0; packet[6] = 0; packet[7] = 0; packet[8] = 3;
+  packet[5] = 0;
+  packet[6] = 0;
+  packet[7] = 0;
+  packet[8] = 3;
   // Extension name
   let p = 9;
-  packet[p++] = 0; packet[p++] = 0;
+  packet[p++] = 0;
+  packet[p++] = 0;
   packet[p++] = (extName.length >> 8) & 0xff;
   packet[p++] = extName.length & 0xff;
-  packet.set(extName, p); p += extName.length;
+  packet.set(extName, p);
+  p += extName.length;
   // Extension value
-  packet[p++] = 0; packet[p++] = 0;
+  packet[p++] = 0;
+  packet[p++] = 0;
   packet[p++] = (extValue.length >> 8) & 0xff;
   packet[p++] = extValue.length & 0xff;
   packet.set(extValue, p);
@@ -1434,7 +1440,9 @@ Deno.test('SFTP: push(null) when not readable does not emit end', () => {
   // Set readable to false before pushing null
   (sftp as unknown as Record<string, boolean>).readable = false;
   let endEmitted = false;
-  sftp.on('end', () => { endEmitted = true; });
+  sftp.on('end', () => {
+    endEmitted = true;
+  });
   sftp.push(null);
   assertEquals(endEmitted, false);
 });

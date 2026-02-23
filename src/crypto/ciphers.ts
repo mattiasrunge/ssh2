@@ -4,13 +4,13 @@
  * Implements AES-GCM, AES-CTR, AES-CBC, and ChaCha20-Poly1305 ciphers for SSH protocol.
  */
 
-import { randomFill } from './random.ts';
-import { hmac } from './hash.ts';
-import { incrementCounter, timingSafeEqual } from './utils.ts';
-import { allocBytes, concatBytes, readUInt32BE, writeUInt32BE } from '../utils/binary.ts';
-import type { CipherInfo, MACInfo } from '../protocol/constants.ts';
-import { ChaChaPolyCipher, ChaChaPolyDecipher } from './chacha20.ts';
 import { cbc } from '@noble/ciphers/aes';
+import type { CipherInfo, MACInfo } from '../protocol/constants.ts';
+import { allocBytes, concatBytes, readUInt32BE, writeUInt32BE } from '../utils/binary.ts';
+import { ChaChaPolyCipher, ChaChaPolyDecipher } from './chacha20.ts';
+import { hmac } from './hash.ts';
+import { randomFill } from './random.ts';
+import { incrementCounter, timingSafeEqual } from './utils.ts';
 
 const MAX_PACKET_SIZE = 35000;
 
@@ -740,7 +740,9 @@ export class GenericDecipher implements Decipher {
           let decryptedBlock: Uint8Array;
           if (this._cipherMode === 'AES-CBC') {
             // noble/ciphers provides raw AES-CBC without PKCS#7 padding requirements
-            decryptedBlock = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(this._firstBlock!);
+            decryptedBlock = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(
+              this._firstBlock!,
+            );
           } else {
             const key = await this._getKey();
             const decrypted = await crypto.subtle.decrypt(
@@ -818,7 +820,9 @@ export class GenericDecipher implements Decipher {
           const lastCiphertextBlock = new Uint8Array(
             this._packet!.subarray(this._packet!.length - this._blockLen),
           );
-          plaintext = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(this._packet!);
+          plaintext = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(
+            this._packet!,
+          );
           this._decIV.set(lastCiphertextBlock);
         } else {
           const key = await this._getKey();
@@ -847,7 +851,9 @@ export class GenericDecipher implements Decipher {
             const lastCiphertextBlock = new Uint8Array(
               remaining.subarray(remaining.length - this._blockLen),
             );
-            const decrypted = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(remaining);
+            const decrypted = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(
+              remaining,
+            );
             this._packet!.set(decrypted, this._blockLen);
             // Update IV to last ciphertext block for next packet
             this._decIV.set(lastCiphertextBlock);

@@ -486,4 +486,3 @@ export function mustCall<T extends (...args: any[]) => any>(
 
   return wrapped;
 }
-

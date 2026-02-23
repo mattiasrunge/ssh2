@@ -7,6 +7,7 @@
  */
 
 import { assertEquals, assertExists } from '@std/assert';
+import type { Channel } from '../src/Channel.ts';
 import { Client } from '../src/client.ts';
 import {
   type Connection,
@@ -16,7 +17,6 @@ import {
   type ServerAuthContext,
   type Session,
 } from '../src/server.ts';
-import type { Channel } from '../src/Channel.ts';
 import {
   clearMustCallChecks,
   generateTestHostKeyEd25519,
@@ -54,8 +54,12 @@ async function createTestContext(title: string): Promise<TestContext> {
   await server.listen(0, '127.0.0.1');
 
   const cleanup = async () => {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     verifyMustCallChecks();
   };
 
@@ -78,21 +82,33 @@ async function connectWithPasswordAuth(
       if (connReady && clientReady && conn) resolve(conn);
     };
 
-    server.on('connection', mustCall((c: Connection) => {
-      conn = c;
-      c.on('authentication', mustCall((authCtx: ServerAuthContext) => {
-        authCtx.accept();
-      }));
-      c.on('ready', mustCall(() => {
-        connReady = true;
-        checkBothReady();
-      }));
-    }));
+    server.on(
+      'connection',
+      mustCall((c: Connection) => {
+        conn = c;
+        c.on(
+          'authentication',
+          mustCall((authCtx: ServerAuthContext) => {
+            authCtx.accept();
+          }),
+        );
+        c.on(
+          'ready',
+          mustCall(() => {
+            connReady = true;
+            checkBothReady();
+          }),
+        );
+      }),
+    );
 
-    client.on('ready', mustCall(() => {
-      clientReady = true;
-      checkBothReady();
-    }));
+    client.on(
+      'ready',
+      mustCall(() => {
+        clientReady = true;
+        checkBothReady();
+      }),
+    );
 
     client.connect({
       host: addr.hostname,
@@ -119,8 +135,12 @@ Deno.test('auth: keyboard-interactive basic prompt and response', async () => {
     let serverReady = false;
     let clientReady = false;
     let resolveAuth!: () => void;
-    const authDone = new Promise<void>((res) => { resolveAuth = res; });
-    const checkDone = () => { if (serverReady && clientReady) resolveAuth(); };
+    const authDone = new Promise<void>((res) => {
+      resolveAuth = res;
+    });
+    const checkDone = () => {
+      if (serverReady && clientReady) resolveAuth();
+    };
 
     ctx.server.on('connection', (conn: Connection) => {
       // Auth fires twice: once for 'none' and once for 'keyboard-interactive'
@@ -137,13 +157,19 @@ Deno.test('auth: keyboard-interactive basic prompt and response', async () => {
           kbCtx.accept();
         });
       });
-      conn.on('ready', () => { serverReady = true; checkDone(); });
+      conn.on('ready', () => {
+        serverReady = true;
+        checkDone();
+      });
     });
 
     ctx.client.on('keyboard-interactive', (_name, _instructions, _lang, _prompts, finish) => {
       finish(['secret']);
     });
-    ctx.client.on('ready', () => { clientReady = true; checkDone(); });
+    ctx.client.on('ready', () => {
+      clientReady = true;
+      checkDone();
+    });
 
     await ctx.client.connect({
       host: addr.hostname,
@@ -169,8 +195,12 @@ Deno.test('auth: keyboard-interactive with title + instructions + callback', asy
     let serverReady = false;
     let clientReady = false;
     let resolveAuth!: () => void;
-    const authDone = new Promise<void>((res) => { resolveAuth = res; });
-    const checkDone = () => { if (serverReady && clientReady) resolveAuth(); };
+    const authDone = new Promise<void>((res) => {
+      resolveAuth = res;
+    });
+    const checkDone = () => {
+      if (serverReady && clientReady) resolveAuth();
+    };
 
     ctx.server.on('connection', (conn: Connection) => {
       conn.on('authentication', (authCtx: ServerAuthContext) => {
@@ -189,13 +219,19 @@ Deno.test('auth: keyboard-interactive with title + instructions + callback', asy
           },
         );
       });
-      conn.on('ready', () => { serverReady = true; checkDone(); });
+      conn.on('ready', () => {
+        serverReady = true;
+        checkDone();
+      });
     });
 
     ctx.client.on('keyboard-interactive', (_name, _instructions, _lang, _prompts, finish) => {
       finish(['mypass']);
     });
-    ctx.client.on('ready', () => { clientReady = true; checkDone(); });
+    ctx.client.on('ready', () => {
+      clientReady = true;
+      checkDone();
+    });
 
     await ctx.client.connect({
       host: addr.hostname,
@@ -220,8 +256,12 @@ Deno.test('auth: keyboard-interactive with title and cb as second arg', async ()
     let serverReady = false;
     let clientReady = false;
     let resolveAuth!: () => void;
-    const authDone = new Promise<void>((res) => { resolveAuth = res; });
-    const checkDone = () => { if (serverReady && clientReady) resolveAuth(); };
+    const authDone = new Promise<void>((res) => {
+      resolveAuth = res;
+    });
+    const checkDone = () => {
+      if (serverReady && clientReady) resolveAuth();
+    };
 
     ctx.server.on('connection', (conn: Connection) => {
       conn.on('authentication', (authCtx: ServerAuthContext) => {
@@ -236,11 +276,17 @@ Deno.test('auth: keyboard-interactive with title and cb as second arg', async ()
           kbCtx.accept();
         });
       });
-      conn.on('ready', () => { serverReady = true; checkDone(); });
+      conn.on('ready', () => {
+        serverReady = true;
+        checkDone();
+      });
     });
 
     ctx.client.on('keyboard-interactive', (_n, _i, _l, _p, finish) => finish(['p@ss']));
-    ctx.client.on('ready', () => { clientReady = true; checkDone(); });
+    ctx.client.on('ready', () => {
+      clientReady = true;
+      checkDone();
+    });
 
     await ctx.client.connect({
       host: addr.hostname,
@@ -265,8 +311,12 @@ Deno.test('auth: keyboard-interactive with array prompt and cb as second arg', a
     let serverReady = false;
     let clientReady = false;
     let resolveAuth!: () => void;
-    const authDone = new Promise<void>((res) => { resolveAuth = res; });
-    const checkDone = () => { if (serverReady && clientReady) resolveAuth(); };
+    const authDone = new Promise<void>((res) => {
+      resolveAuth = res;
+    });
+    const checkDone = () => {
+      if (serverReady && clientReady) resolveAuth();
+    };
 
     ctx.server.on('connection', (conn: Connection) => {
       conn.on('authentication', (authCtx: ServerAuthContext) => {
@@ -281,11 +331,17 @@ Deno.test('auth: keyboard-interactive with array prompt and cb as second arg', a
           kbCtx.accept();
         });
       });
-      conn.on('ready', () => { serverReady = true; checkDone(); });
+      conn.on('ready', () => {
+        serverReady = true;
+        checkDone();
+      });
     });
 
     ctx.client.on('keyboard-interactive', (_n, _i, _l, _p, finish) => finish(['abc123']));
-    ctx.client.on('ready', () => { clientReady = true; checkDone(); });
+    ctx.client.on('ready', () => {
+      clientReady = true;
+      checkDone();
+    });
 
     await ctx.client.connect({
       host: addr.hostname,
@@ -310,21 +366,27 @@ Deno.test('auth: rejection with methods triggers USERAUTH_FAILURE', async () => 
 
     // Resolve from conn 'ready' (after USERAUTH_SUCCESS is sent) to avoid race with cleanup
     const done = new Promise<void>((resolve) => {
-      ctx.server.on('connection', mustCall((conn: Connection) => {
-        conn.on('authentication', (authCtx: ServerAuthContext) => {
-          attempts++;
-          if (attempts === 1) {
-            authCtx.reject(['password']);
-          } else {
-            authCtx.accept();
-          }
-        });
-        conn.on('ready', () => resolve());
-      }));
+      ctx.server.on(
+        'connection',
+        mustCall((conn: Connection) => {
+          conn.on('authentication', (authCtx: ServerAuthContext) => {
+            attempts++;
+            if (attempts === 1) {
+              authCtx.reject(['password']);
+            } else {
+              authCtx.accept();
+            }
+          });
+          conn.on('ready', () => resolve());
+        }),
+      );
     });
 
     await ctx.client.connect({
-      host: addr.hostname, port: addr.port, username: 'test', password: 'pass',
+      host: addr.hostname,
+      port: addr.port,
+      username: 'test',
+      password: 'pass',
     });
 
     await done;
@@ -342,11 +404,17 @@ Deno.test('auth: rejection without methods list', async () => {
 
     // Server rejects with no methods → client has no fallback and emits error
     const done = new Promise<void>((resolve) => {
-      ctx.server.on('connection', mustCall((conn: Connection) => {
-        conn.on('authentication', mustCall((authCtx: ServerAuthContext) => {
-          authCtx.reject(); // No methods list - covers USERAUTH_FAILURE with empty methods
-        }));
-      }));
+      ctx.server.on(
+        'connection',
+        mustCall((conn: Connection) => {
+          conn.on(
+            'authentication',
+            mustCall((authCtx: ServerAuthContext) => {
+              authCtx.reject(); // No methods list - covers USERAUTH_FAILURE with empty methods
+            }),
+          );
+        }),
+      );
       // Client emits error when no methods remain after USERAUTH_FAILURE with empty list
       ctx.client.once('error', () => resolve());
     });
@@ -377,24 +445,42 @@ Deno.test('auth: banner is sent on first authentication request', async () => {
     let bannerGot = false;
     let clientReady = false;
     let resolveAll!: () => void;
-    const done = new Promise<void>((res) => { resolveAll = res; });
-    const check = () => { if (bannerGot && clientReady) resolveAll(); };
+    const done = new Promise<void>((res) => {
+      resolveAll = res;
+    });
+    const check = () => {
+      if (bannerGot && clientReady) resolveAll();
+    };
 
-    client.on('banner', (message: string) => { bannerText = message; bannerGot = true; check(); });
-    client.on('ready', () => { clientReady = true; check(); });
+    client.on('banner', (message: string) => {
+      bannerText = message;
+      bannerGot = true;
+      check();
+    });
+    client.on('ready', () => {
+      clientReady = true;
+      check();
+    });
 
-    server.on('connection', mustCall((conn: Connection) => {
-      conn.on('authentication', mustCall((authCtx: ServerAuthContext) => authCtx.accept()));
-      // conn 'ready' fires before client 'ready', so no mustCall needed here
-    }));
+    server.on(
+      'connection',
+      mustCall((conn: Connection) => {
+        conn.on('authentication', mustCall((authCtx: ServerAuthContext) => authCtx.accept()));
+        // conn 'ready' fires before client 'ready', so no mustCall needed here
+      }),
+    );
 
     await client.connect({ host: addr.hostname, port: addr.port, username: 'test', password: 'p' });
     await done;
 
     assertEquals(bannerText, BANNER);
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     verifyMustCallChecks();
   }
 });
@@ -407,19 +493,28 @@ Deno.test('auth: double accept is a no-op', async () => {
     const addr = ctx.server.address()!;
 
     const done = new Promise<void>((resolve) => {
-      ctx.server.on('connection', mustCall((conn: Connection) => {
-        conn.on('authentication', mustCall((authCtx: ServerAuthContext) => {
-          authCtx.accept();
-          authCtx.accept(); // No-op
-          resolve();
-        }));
-        conn.on('ready', () => {});
-      }));
+      ctx.server.on(
+        'connection',
+        mustCall((conn: Connection) => {
+          conn.on(
+            'authentication',
+            mustCall((authCtx: ServerAuthContext) => {
+              authCtx.accept();
+              authCtx.accept(); // No-op
+              resolve();
+            }),
+          );
+          conn.on('ready', () => {});
+        }),
+      );
     });
 
     ctx.client.on('ready', () => {});
     await ctx.client.connect({
-      host: addr.hostname, port: addr.port, username: 'test', password: 'pass',
+      host: addr.hostname,
+      port: addr.port,
+      username: 'test',
+      password: 'pass',
     });
 
     await done;
@@ -440,26 +535,35 @@ Deno.test('session: env request is forwarded to session listener', async () => {
     const conn = await connectWithPasswordAuth(ctx, 'env request');
 
     const envReceived = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('env', mustCall((
-          acceptEnv: (() => void) | undefined,
-          _reject: (() => void) | undefined,
-          info: { key: string; val: string },
-        ) => {
-          assertEquals(info.key, 'MY_VAR');
-          assertEquals(info.val, 'hello');
-          acceptEnv?.();
+          session!.on(
+            'env',
+            mustCall((
+              acceptEnv: (() => void) | undefined,
+              _reject: (() => void) | undefined,
+              info: { key: string; val: string },
+            ) => {
+              assertEquals(info.key, 'MY_VAR');
+              assertEquals(info.val, 'hello');
+              acceptEnv?.();
 
-          session!.on('shell', mustCall((shellAccept: () => Channel | undefined) => {
-            const chan = shellAccept();
-            chan?.end();
-            resolve();
-          }));
-        }));
-      }));
+              session!.on(
+                'shell',
+                mustCall((shellAccept: () => Channel | undefined) => {
+                  const chan = shellAccept();
+                  chan?.end();
+                  resolve();
+                }),
+              );
+            }),
+          );
+        }),
+      );
     });
 
     // shell() with env sends env request before shell
@@ -480,25 +584,34 @@ Deno.test('session: pty-req is forwarded to session listener', async () => {
     const conn = await connectWithPasswordAuth(ctx, 'pty request');
 
     const done = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('pty', mustCall((
-          acceptPty: (() => void) | undefined,
-          _reject: (() => void) | undefined,
-          info: Record<string, unknown>,
-        ) => {
-          assertExists(info.term);
-          acceptPty?.();
+          session!.on(
+            'pty',
+            mustCall((
+              acceptPty: (() => void) | undefined,
+              _reject: (() => void) | undefined,
+              info: Record<string, unknown>,
+            ) => {
+              assertExists(info.term);
+              acceptPty?.();
 
-          session!.on('shell', mustCall((shellAccept: () => Channel | undefined) => {
-            const chan = shellAccept();
-            chan?.end();
-            resolve();
-          }));
-        }));
-      }));
+              session!.on(
+                'shell',
+                mustCall((shellAccept: () => Channel | undefined) => {
+                  const chan = shellAccept();
+                  chan?.end();
+                  resolve();
+                }),
+              );
+            }),
+          );
+        }),
+      );
     });
 
     // shell() sends pty-req by default
@@ -520,29 +633,41 @@ Deno.test('session: window-change with listener', async () => {
     const conn = await connectWithPasswordAuth(ctx, 'window-change with listener');
 
     const windowChangeDone = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('pty', mustCall((acceptPty: (() => void) | undefined) => {
-          acceptPty?.();
-        }));
+          session!.on(
+            'pty',
+            mustCall((acceptPty: (() => void) | undefined) => {
+              acceptPty?.();
+            }),
+          );
 
-        session!.on('window-change', mustCall((
-          _acceptWc: (() => void) | undefined,
-          _reject: (() => void) | undefined,
-          info: { cols: number; rows: number },
-        ) => {
-          assertEquals(info.cols, 120);
-          assertEquals(info.rows, 40);
-          resolve();
-        }));
+          session!.on(
+            'window-change',
+            mustCall((
+              _acceptWc: (() => void) | undefined,
+              _reject: (() => void) | undefined,
+              info: { cols: number; rows: number },
+            ) => {
+              assertEquals(info.cols, 120);
+              assertEquals(info.rows, 40);
+              resolve();
+            }),
+          );
 
-        session!.on('shell', mustCall((shellAccept: () => Channel | undefined) => {
-          const chan = shellAccept();
-          chan?.end();
-        }));
-      }));
+          session!.on(
+            'shell',
+            mustCall((shellAccept: () => Channel | undefined) => {
+              const chan = shellAccept();
+              chan?.end();
+            }),
+          );
+        }),
+      );
     });
 
     const channel = await ctx.client.shell();
@@ -563,21 +688,30 @@ Deno.test('session: window-change without listener is auto-rejected', async () =
     const conn = await connectWithPasswordAuth(ctx, 'window-change no listener');
 
     const done = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('pty', mustCall((acceptPty: (() => void) | undefined) => {
-          acceptPty?.();
-        }));
+          session!.on(
+            'pty',
+            mustCall((acceptPty: (() => void) | undefined) => {
+              acceptPty?.();
+            }),
+          );
 
-        // No 'window-change' listener → auto-reject branch in server.ts
-        session!.on('shell', mustCall((shellAccept: () => Channel | undefined) => {
-          const chan = shellAccept();
-          chan?.end();
-          resolve();
-        }));
-      }));
+          // No 'window-change' listener → auto-reject branch in server.ts
+          session!.on(
+            'shell',
+            mustCall((shellAccept: () => Channel | undefined) => {
+              const chan = shellAccept();
+              chan?.end();
+              resolve();
+            }),
+          );
+        }),
+      );
     });
 
     const channel = await ctx.client.shell();
@@ -598,22 +732,31 @@ Deno.test('session: auth-agent-req is forwarded to session listener', async () =
     const conn = await connectWithPasswordAuth(ctx, 'auth-agent request');
 
     const done = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('auth-agent', mustCall((
-          acceptAgent: (() => void) | undefined,
-        ) => {
-          acceptAgent?.();
-        }));
+          session!.on(
+            'auth-agent',
+            mustCall((
+              acceptAgent: (() => void) | undefined,
+            ) => {
+              acceptAgent?.();
+            }),
+          );
 
-        session!.on('shell', mustCall((shellAccept: () => Channel | undefined) => {
-          const chan = shellAccept();
-          chan?.end();
-          resolve();
-        }));
-      }));
+          session!.on(
+            'shell',
+            mustCall((shellAccept: () => Channel | undefined) => {
+              const chan = shellAccept();
+              chan?.end();
+              resolve();
+            }),
+          );
+        }),
+      );
     });
 
     // shell with agentForward sends auth-agent-req
@@ -634,22 +777,30 @@ Deno.test('session: sftp subsystem is emitted as sftp event', async () => {
     const conn = await connectWithPasswordAuth(ctx, 'sftp subsystem');
 
     const sftpDone = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('sftp', mustCall((
-          sftpAccept: () => Channel | undefined,
-        ) => {
-          const chan = sftpAccept();
-          assertExists(chan);
-          // Resolve immediately - 'sftp' event with valid channel confirms coverage.
-          // Don't wait for chan 'close'; the SFTP protocol handshake may not complete
-          // when the server destroys the channel before the client finishes SSH_FXP_INIT.
-          resolve();
-          try { chan?.destroy(); } catch { /* ignore */ }
-        }));
-      }));
+          session!.on(
+            'sftp',
+            mustCall((
+              sftpAccept: () => Channel | undefined,
+            ) => {
+              const chan = sftpAccept();
+              assertExists(chan);
+              // Resolve immediately - 'sftp' event with valid channel confirms coverage.
+              // Don't wait for chan 'close'; the SFTP protocol handshake may not complete
+              // when the server destroys the channel before the client finishes SSH_FXP_INIT.
+              resolve();
+              try {
+                chan?.destroy();
+              } catch { /* ignore */ }
+            }),
+          );
+        }),
+      );
     });
 
     // client.sftp() sends subsystem 'sftp'
@@ -673,18 +824,21 @@ Deno.test('channel: direct-tcpip channel open is accepted', async () => {
     const conn = await connectWithPasswordAuth(ctx, 'direct-tcpip open');
 
     const tcpipDone = new Promise<void>((resolve) => {
-      conn.on('tcpip', mustCall((
-        accept: () => Channel | undefined,
-        _reject: () => void,
-        info: { srcIP: string; srcPort: number; destIP: string; destPort: number },
-      ) => {
-        assertEquals(info.destIP, '192.168.1.1');
-        assertEquals(info.destPort, 80);
-        const channel = accept();
-        assertExists(channel);
-        channel!.end();
-        resolve();
-      }));
+      conn.on(
+        'tcpip',
+        mustCall((
+          accept: () => Channel | undefined,
+          _reject: () => void,
+          info: { srcIP: string; srcPort: number; destIP: string; destPort: number },
+        ) => {
+          assertEquals(info.destIP, '192.168.1.1');
+          assertEquals(info.destPort, 80);
+          const channel = accept();
+          assertExists(channel);
+          channel!.end();
+          resolve();
+        }),
+      );
     });
 
     const channel = await ctx.client.forwardOut('127.0.0.1', 12345, '192.168.1.1', 80);
@@ -787,18 +941,25 @@ Deno.test('server: RSA host key registers multiple hash algorithm variants', asy
 
   try {
     const readyDone = new Promise<void>((resolve) => {
-      server.on('connection', mustCall((conn: Connection) => {
-        conn.on('authentication', mustCall((authCtx: ServerAuthContext) => authCtx.accept()));
-        conn.on('ready', mustCall(() => {}));
-      }));
+      server.on(
+        'connection',
+        mustCall((conn: Connection) => {
+          conn.on('authentication', mustCall((authCtx: ServerAuthContext) => authCtx.accept()));
+          conn.on('ready', mustCall(() => {}));
+        }),
+      );
       client.on('ready', mustCall(() => resolve()));
     });
 
     await client.connect({ host: addr.hostname, port: addr.port, username: 'test', password: 't' });
     await readyDone;
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     verifyMustCallChecks();
   }
 });
@@ -833,8 +994,12 @@ Deno.test('server: constructor with connection listener argument', async () => {
     await done;
     assertEquals(listenerCalled, true);
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     verifyMustCallChecks();
   }
 });
@@ -884,9 +1049,15 @@ Deno.test('server: maxConnections limits simultaneous connections', async () => 
 
     await client2Dropped;
   } finally {
-    try { client1.end(); } catch { /* ignore */ }
-    try { client2.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client1.end();
+    } catch { /* ignore */ }
+    try {
+      client2.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     clearMustCallChecks();
   }
 });
@@ -912,17 +1083,20 @@ Deno.test('auth: publickey auth with user private key', async () => {
   try {
     // Wait for conn 'ready' to ensure USERAUTH_SUCCESS was processed before cleanup
     const done = new Promise<void>((resolve) => {
-      server.on('connection', mustCall((conn: Connection) => {
-        conn.on('authentication', (authCtx: ServerAuthContext) => {
-          if (authCtx.method === 'publickey') {
-            const pkCtx = authCtx as PKAuthContext;
-            pkCtx.accept();
-          } else {
-            authCtx.reject(['publickey']);
-          }
-        });
-        conn.on('ready', () => resolve());
-      }));
+      server.on(
+        'connection',
+        mustCall((conn: Connection) => {
+          conn.on('authentication', (authCtx: ServerAuthContext) => {
+            if (authCtx.method === 'publickey') {
+              const pkCtx = authCtx as PKAuthContext;
+              pkCtx.accept();
+            } else {
+              authCtx.reject(['publickey']);
+            }
+          });
+          conn.on('ready', () => resolve());
+        }),
+      );
     });
 
     client.on('ready', () => {});
@@ -935,8 +1109,12 @@ Deno.test('auth: publickey auth with user private key', async () => {
 
     await done;
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     clearMustCallChecks();
   }
 });
@@ -962,22 +1140,28 @@ Deno.test('session: exec command is forwarded to session listener', async () => 
     const conn = await connectWithPasswordAuth(ctx, 'exec command');
 
     const execDone = new Promise<void>((resolve) => {
-      conn.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        assertExists(session);
+      conn.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          assertExists(session);
 
-        session!.on('exec', mustCall((
-          execAccept: () => Channel | undefined,
-          _reject: (() => void) | undefined,
-          info: { command: string },
-        ) => {
-          assertEquals(info.command, 'echo hello');
-          const chan = execAccept();
-          assertExists(chan);
-          chan!.end();
-          resolve();
-        }));
-      }));
+          session!.on(
+            'exec',
+            mustCall((
+              execAccept: () => Channel | undefined,
+              _reject: (() => void) | undefined,
+              info: { command: string },
+            ) => {
+              assertEquals(info.command, 'echo hello');
+              const chan = execAccept();
+              assertExists(chan);
+              chan!.end();
+              resolve();
+            }),
+          );
+        }),
+      );
     });
 
     const channel = await ctx.client.exec('echo hello');
@@ -1035,30 +1219,43 @@ Deno.test('coverage: debug logging branches are covered by enabled debug mode', 
     let serverReady = false;
     let clientReady = false;
     let resolveAll!: () => void;
-    const ready = new Promise<void>((res) => { resolveAll = res; });
-    const check = () => { if (serverReady && clientReady) resolveAll(); };
+    const ready = new Promise<void>((res) => {
+      resolveAll = res;
+    });
+    const check = () => {
+      if (serverReady && clientReady) resolveAll();
+    };
 
     let serverConn: Connection | undefined;
 
-    server.on('connection', mustCall((conn: Connection) => {
-      serverConn = conn;
-      // Use keyboard-interactive to cover USERAUTH_INFO_REQUEST/RESPONSE debug branches
-      conn.on('authentication', (authCtx: ServerAuthContext) => {
-        if (authCtx.method === 'keyboard-interactive') {
-          const kbCtx = authCtx as KeyboardAuthContext;
-          kbCtx.prompt('Enter token:', (responses) => {
-            assertEquals(responses[0], 'debugtoken');
-            kbCtx.accept();
-          });
-        } else {
-          authCtx.reject(['keyboard-interactive']);
-        }
-      });
-      conn.on('ready', () => { serverReady = true; check(); });
-    }));
+    server.on(
+      'connection',
+      mustCall((conn: Connection) => {
+        serverConn = conn;
+        // Use keyboard-interactive to cover USERAUTH_INFO_REQUEST/RESPONSE debug branches
+        conn.on('authentication', (authCtx: ServerAuthContext) => {
+          if (authCtx.method === 'keyboard-interactive') {
+            const kbCtx = authCtx as KeyboardAuthContext;
+            kbCtx.prompt('Enter token:', (responses) => {
+              assertEquals(responses[0], 'debugtoken');
+              kbCtx.accept();
+            });
+          } else {
+            authCtx.reject(['keyboard-interactive']);
+          }
+        });
+        conn.on('ready', () => {
+          serverReady = true;
+          check();
+        });
+      }),
+    );
 
     client.on('keyboard-interactive', (_n, _i, _l, _p, finish) => finish(['debugtoken']));
-    client.on('ready', () => { clientReady = true; check(); });
+    client.on('ready', () => {
+      clientReady = true;
+      check();
+    });
 
     await client.connect({
       host: addr.hostname,
@@ -1072,14 +1269,20 @@ Deno.test('coverage: debug logging branches are covered by enabled debug mode', 
 
     // Do a full session + shell to cover CHANNEL_REQUEST debug branches
     const shellDone = new Promise<void>((resolve) => {
-      serverConn!.on('session', mustCall((acceptSession: () => Session | undefined) => {
-        const session = acceptSession();
-        session!.on('shell', mustCall((shellAccept: () => Channel | undefined) => {
-          const chan = shellAccept();
-          chan?.end();
-          resolve();
-        }));
-      }));
+      serverConn!.on(
+        'session',
+        mustCall((acceptSession: () => Session | undefined) => {
+          const session = acceptSession();
+          session!.on(
+            'shell',
+            mustCall((shellAccept: () => Channel | undefined) => {
+              const chan = shellAccept();
+              chan?.end();
+              resolve();
+            }),
+          );
+        }),
+      );
     });
 
     const channel = await client.shell({ pty: false });
@@ -1088,12 +1291,15 @@ Deno.test('coverage: debug logging branches are covered by enabled debug mode', 
 
     // Also do a forwardIn to cover GLOBAL_REQUEST/REQUEST_SUCCESS debug branches
     const requestDone = new Promise<void>((resolve) => {
-      serverConn!.on('request', mustCall((
-        accept: ((port?: number) => void) | undefined,
-      ) => {
-        accept?.();
-        resolve();
-      }));
+      serverConn!.on(
+        'request',
+        mustCall((
+          accept: ((port?: number) => void) | undefined,
+        ) => {
+          accept?.();
+          resolve();
+        }),
+      );
     });
 
     await client.forwardIn('127.0.0.1', 0);
@@ -1107,8 +1313,12 @@ Deno.test('coverage: debug logging branches are covered by enabled debug mode', 
       // Expected: auto-rejected since no new 'request' listener registered
     }
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     clearMustCallChecks();
   }
 });
@@ -1135,8 +1345,12 @@ Deno.test('auth: no authentication listener auto-rejects connections', async () 
     await client.connect({ host: addr.hostname, port: addr.port, username: 'test', password: 'p' });
     await done;
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     clearMustCallChecks();
   }
 });
@@ -1182,17 +1396,35 @@ Deno.test('channel: session open rejected when no session listener', async () =>
         if (connReady && clientReady && serverConn) resolve();
       };
 
-      ctx.server.on('connection', mustCall((c: Connection) => {
-        serverConn = c;
-        // No 'session' listener registered here
-        c.on('authentication', mustCall((authCtx: ServerAuthContext) => authCtx.accept()));
-        c.on('ready', mustCall(() => { connReady = true; check(); }));
-      }));
+      ctx.server.on(
+        'connection',
+        mustCall((c: Connection) => {
+          serverConn = c;
+          // No 'session' listener registered here
+          c.on('authentication', mustCall((authCtx: ServerAuthContext) => authCtx.accept()));
+          c.on(
+            'ready',
+            mustCall(() => {
+              connReady = true;
+              check();
+            }),
+          );
+        }),
+      );
 
-      ctx.client.on('ready', mustCall(() => { clientReady = true; check(); }));
+      ctx.client.on(
+        'ready',
+        mustCall(() => {
+          clientReady = true;
+          check();
+        }),
+      );
 
       ctx.client.connect({
-        host: addr.hostname, port: addr.port, username: 'test', password: 'pass',
+        host: addr.hostname,
+        port: addr.port,
+        username: 'test',
+        password: 'pass',
       }).catch(reject);
     });
 
@@ -1220,9 +1452,12 @@ Deno.test('session: connection close emits close on server Connection', async ()
     const conn = await connectWithPasswordAuth(ctx, 'conn close');
 
     const closeDone = new Promise<void>((resolve) => {
-      conn.on('close', mustCall(() => {
-        resolve();
-      }));
+      conn.on(
+        'close',
+        mustCall(() => {
+          resolve();
+        }),
+      );
     });
 
     // Client disconnects - server Connection should emit 'close'
@@ -1242,20 +1477,23 @@ Deno.test('global: cancel-tcpip-forward is handled by request listener', async (
 
     // Register listener that handles both tcpip-forward and cancel-tcpip-forward
     let cancelReceived = false;
-    conn.on('request', mustCall((
-      accept: ((port?: number) => void) | undefined,
-      _reject: (() => void) | undefined,
-      name: string,
-    ) => {
-      if (name === 'tcpip-forward') {
-        accept?.();
-      } else if (name === 'cancel-tcpip-forward') {
-        cancelReceived = true;
-        accept?.();
-      } else {
-        accept?.();
-      }
-    }, 2));
+    conn.on(
+      'request',
+      mustCall((
+        accept: ((port?: number) => void) | undefined,
+        _reject: (() => void) | undefined,
+        name: string,
+      ) => {
+        if (name === 'tcpip-forward') {
+          accept?.();
+        } else if (name === 'cancel-tcpip-forward') {
+          cancelReceived = true;
+          accept?.();
+        } else {
+          accept?.();
+        }
+      }, 2),
+    );
 
     // First forward-in, then cancel
     await ctx.client.forwardIn('127.0.0.1', 0);

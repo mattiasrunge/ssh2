@@ -4,9 +4,9 @@
  * Provides high-performance file transfer using concurrent requests.
  */
 
+import { modeNum } from './packet.ts';
 import type { SFTP } from './SFTP.ts';
 import type { SFTPHandle, TransferOptions, TransferProgress } from './types.ts';
-import { modeNum } from './packet.ts';
 
 const DEFAULT_CONCURRENCY = 64;
 const DEFAULT_CHUNK_SIZE = 32768;

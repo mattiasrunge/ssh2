@@ -9,8 +9,9 @@
  * - RFC4716 public keys
  */
 
-import { Ber, BerReader, BerWriter } from '../utils/ber.ts';
+import { cbc, ctr, gcm } from '@noble/ciphers/aes';
 import { pbkdf as bcrypt_pbkdf } from 'bcrypt-pbkdf';
+import { Ber, BerReader, BerWriter } from '../utils/ber.ts';
 import {
   allocBytes,
   fromBase64,
@@ -21,7 +22,6 @@ import {
 } from '../utils/binary.ts';
 import { CIPHER_INFO } from './constants.ts';
 import { makeBufferParser, readString } from './utils.ts';
-import { cbc, ctr, gcm } from '@noble/ciphers/aes';
 
 /** Symbol key for the hash algorithm property on a parsed key (exported for testing). */
 export const SYM_HASH_ALGO = Symbol('Hash Algorithm');
@@ -1467,8 +1467,7 @@ async function parsePPKPrivate(
   const encryptionBytes = encoder.encode(encryption);
   const commentBytes = encoder.encode(comment);
 
-  const macDataLen =
-    4 + keyTypeBytes.length +
+  const macDataLen = 4 + keyTypeBytes.length +
     4 + encryptionBytes.length +
     4 + commentBytes.length +
     4 + pubBlob.length +
@@ -1476,28 +1475,42 @@ async function parsePPKPrivate(
   const macData = allocBytes(macDataLen);
   let offset = 0;
 
-  writeUInt32BE(macData, keyTypeBytes.length, offset); offset += 4;
-  macData.set(keyTypeBytes, offset); offset += keyTypeBytes.length;
-  writeUInt32BE(macData, encryptionBytes.length, offset); offset += 4;
-  macData.set(encryptionBytes, offset); offset += encryptionBytes.length;
-  writeUInt32BE(macData, commentBytes.length, offset); offset += 4;
-  macData.set(commentBytes, offset); offset += commentBytes.length;
-  writeUInt32BE(macData, pubBlob.length, offset); offset += 4;
-  macData.set(pubBlob, offset); offset += pubBlob.length;
-  writeUInt32BE(macData, privBlob.length, offset); offset += 4;
+  writeUInt32BE(macData, keyTypeBytes.length, offset);
+  offset += 4;
+  macData.set(keyTypeBytes, offset);
+  offset += keyTypeBytes.length;
+  writeUInt32BE(macData, encryptionBytes.length, offset);
+  offset += 4;
+  macData.set(encryptionBytes, offset);
+  offset += encryptionBytes.length;
+  writeUInt32BE(macData, commentBytes.length, offset);
+  offset += 4;
+  macData.set(commentBytes, offset);
+  offset += commentBytes.length;
+  writeUInt32BE(macData, pubBlob.length, offset);
+  offset += 4;
+  macData.set(pubBlob, offset);
+  offset += pubBlob.length;
+  writeUInt32BE(macData, privBlob.length, offset);
+  offset += 4;
   macData.set(privBlob, offset);
 
   const hmacKey = await crypto.subtle.importKey(
-    'raw', macKeyHash as BufferSource,
-    { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'],
+    'raw',
+    macKeyHash as BufferSource,
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign'],
   );
   const computedMac = new Uint8Array(
     await crypto.subtle.sign('HMAC', hmacKey, macData as BufferSource),
   );
   const expectedMac = hexToBytes(macHex);
 
-  if (computedMac.length !== expectedMac.length ||
-      !computedMac.every((b, i) => b === expectedMac[i])) {
+  if (
+    computedMac.length !== expectedMac.length ||
+    !computedMac.every((b, i) => b === expectedMac[i])
+  ) {
     if (encryption !== 'none') {
       return new Error('PPK MAC verification failed -- bad passphrase?');
     }
@@ -1563,7 +1576,6 @@ function hexToBytes(hex: string): Uint8Array {
   }
   return bytes;
 }
-
 
 /**
  * Main key parsing function
@@ -1641,8 +1653,8 @@ function parseKeySync(
   // Encrypted old PEM uses MD5-based key derivation and is not supported
   if (/Proc-Type: 4,ENCRYPTED/.test(strData)) {
     return new Error(
-      'Encrypted old-style PEM keys are not supported. '
-      + 'Convert to the new OpenSSH format with: ssh-keygen -p -o -f <keyfile>',
+      'Encrypted old-style PEM keys are not supported. ' +
+        'Convert to the new OpenSSH format with: ssh-keygen -p -o -f <keyfile>',
     );
   }
 
@@ -1757,8 +1769,8 @@ async function parseKeyAsync(
   // which is insecure and not supported. Convert with: ssh-keygen -p -o -f <keyfile>
   if (/Proc-Type: 4,ENCRYPTED/.test(strData)) {
     return new Error(
-      'Encrypted old-style PEM keys are not supported. '
-      + 'Convert to the new OpenSSH format with: ssh-keygen -p -o -f <keyfile>',
+      'Encrypted old-style PEM keys are not supported. ' +
+        'Convert to the new OpenSSH format with: ssh-keygen -p -o -f <keyfile>',
     );
   }
 

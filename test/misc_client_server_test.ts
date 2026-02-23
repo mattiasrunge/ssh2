@@ -13,6 +13,7 @@
 
 import { assertEquals, assertExists, assertMatch } from '@std/assert';
 
+import { fail } from '@std/assert';
 import { Client } from '../src/client.ts';
 import { type Connection, Server, type ServerAuthContext } from '../src/server.ts';
 import {
@@ -21,7 +22,6 @@ import {
   mustCall,
   verifyMustCallChecks,
 } from './integration_helpers.ts';
-import { fail } from '@std/assert';
 
 /**
  * Create a function that should never be called

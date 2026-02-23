@@ -5,8 +5,8 @@
  */
 
 import { assertEquals } from '@std/assert';
-import { fastGet, fastPut } from '../src/protocol/sftp/transfer.ts';
 import type { SFTP } from '../src/protocol/sftp/SFTP.ts';
+import { fastGet, fastPut } from '../src/protocol/sftp/transfer.ts';
 
 // deno-lint-ignore no-explicit-any
 type AnyFn = (...args: any[]) => any;
@@ -28,7 +28,10 @@ function createSrcMock(data: Uint8Array) {
   return {
     open(_path: string, _flags: string, modeOrCb: number | AnyFn, cb?: AnyFn) {
       const fn = typeof modeOrCb === 'function' ? modeOrCb : cb!;
-      if (openError) { fn(openError); return; }
+      if (openError) {
+        fn(openError);
+        return;
+      }
       const h = nextHandle++;
       handles.set(h, data);
       fn(null, h);
@@ -37,25 +40,46 @@ function createSrcMock(data: Uint8Array) {
       handles.delete(h);
       cb(null);
     },
-    read(_h: number, buf: Uint8Array, offset: number, len: number, pos: number | bigint, cb: AnyFn) {
+    read(
+      _h: number,
+      buf: Uint8Array,
+      offset: number,
+      len: number,
+      pos: number | bigint,
+      cb: AnyFn,
+    ) {
       const p = Number(pos);
       const end = Math.min(p + len, data.length);
       const n = Math.max(0, end - p);
       if (n > 0) buf.set(data.slice(p, end), offset);
       cb(null, n, buf);
     },
-    write(_h: number, _buf: Uint8Array, _offset: number, _len: number, _pos: number | bigint, cb: AnyFn) {
+    write(
+      _h: number,
+      _buf: Uint8Array,
+      _offset: number,
+      _len: number,
+      _pos: number | bigint,
+      cb: AnyFn,
+    ) {
       cb(null);
     },
     fstat(_h: number, cb: AnyFn) {
-      if (fstatError) { cb(fstatError); return; }
+      if (fstatError) {
+        cb(fstatError);
+        return;
+      }
       cb(null, { size: data.length });
     },
     stat(_path: string, cb: AnyFn) {
       cb(null, { size: data.length });
     },
-    setFstatError(err: Error) { fstatError = err; },
-    setOpenError(err: Error) { openError = err; },
+    setFstatError(err: Error) {
+      fstatError = err;
+    },
+    setOpenError(err: Error) {
+      openError = err;
+    },
   };
 }
 
@@ -71,7 +95,10 @@ function createDstMock() {
   return {
     open(_path: string, _flags: string, modeOrCb: number | AnyFn, cb?: AnyFn) {
       const fn = typeof modeOrCb === 'function' ? modeOrCb : cb!;
-      if (openError) { fn(openError); return; }
+      if (openError) {
+        fn(openError);
+        return;
+      }
       fn(null, nextHandle++);
     },
     close(_h: number, cb: (err: Error | null) => void) {
@@ -80,15 +107,33 @@ function createDstMock() {
     read(_h: number, buf: Uint8Array, _o: number, _l: number, _p: number | bigint, cb: AnyFn) {
       cb(null, 0, buf);
     },
-    write(_h: number, buf: Uint8Array, offset: number, len: number, pos: number | bigint, cb: AnyFn) {
-      if (writeError) { cb(writeError); return; }
+    write(
+      _h: number,
+      buf: Uint8Array,
+      offset: number,
+      len: number,
+      pos: number | bigint,
+      cb: AnyFn,
+    ) {
+      if (writeError) {
+        cb(writeError);
+        return;
+      }
       writtenChunks.push({ pos: Number(pos), data: buf.slice(offset, offset + len) });
       cb(null);
     },
-    fstat(_h: number, cb: AnyFn) { cb(null, { size: 0 }); },
-    stat(_path: string, cb: AnyFn) { cb(null, { size: 0 }); },
-    setWriteError(err: Error) { writeError = err; },
-    setOpenError(err: Error) { openError = err; },
+    fstat(_h: number, cb: AnyFn) {
+      cb(null, { size: 0 });
+    },
+    stat(_path: string, cb: AnyFn) {
+      cb(null, { size: 0 });
+    },
+    setWriteError(err: Error) {
+      writeError = err;
+    },
+    setOpenError(err: Error) {
+      openError = err;
+    },
     /** Reassemble written chunks into a contiguous Uint8Array */
     assembleData(totalSize: number): Uint8Array {
       const result = new Uint8Array(totalSize);
@@ -97,7 +142,9 @@ function createDstMock() {
       }
       return result;
     },
-    getWrittenChunks() { return writtenChunks; },
+    getWrittenChunks() {
+      return writtenChunks;
+    },
   };
 }
 
@@ -112,8 +159,12 @@ Deno.test('fastGet: downloads remote data to local file', async () => {
   const localPath = await Deno.makeTempFile();
   try {
     await new Promise<void>((resolve, reject) => {
-      fastGet(mock as unknown as SFTP, '/remote/file.txt', localPath, (err) =>
-        err ? reject(err) : resolve());
+      fastGet(
+        mock as unknown as SFTP,
+        '/remote/file.txt',
+        localPath,
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     const result = await Deno.readFile(localPath);
     assertEquals(result, data);
@@ -130,8 +181,12 @@ Deno.test('fastGet: opts as callback (4th arg is the cb)', async () => {
   try {
     await new Promise<void>((resolve, reject) => {
       // Pass callback directly as 4th argument
-      fastGet(mock as unknown as SFTP, '/remote/file.txt', localPath, (err) =>
-        err ? reject(err) : resolve());
+      fastGet(
+        mock as unknown as SFTP,
+        '/remote/file.txt',
+        localPath,
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     const result = await Deno.readFile(localPath);
     assertEquals(result, data);
@@ -175,8 +230,12 @@ Deno.test('fastGet: fstat fails, fallback to stat succeeds', async () => {
   const localPath = await Deno.makeTempFile();
   try {
     await new Promise<void>((resolve, reject) => {
-      fastGet(mock as unknown as SFTP, '/remote/file.txt', localPath, (err) =>
-        err ? reject(err) : resolve());
+      fastGet(
+        mock as unknown as SFTP,
+        '/remote/file.txt',
+        localPath,
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     const result = await Deno.readFile(localPath);
     assertEquals(result, data);
@@ -211,8 +270,12 @@ Deno.test('fastGet: empty remote file calls callback with null', async () => {
   const localPath = await Deno.makeTempFile();
   try {
     await new Promise<void>((resolve, reject) => {
-      fastGet(mock as unknown as SFTP, '/remote/empty.txt', localPath, (err) =>
-        err ? reject(err) : resolve());
+      fastGet(
+        mock as unknown as SFTP,
+        '/remote/empty.txt',
+        localPath,
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     // No error: empty transfer completed successfully
     const result = await Deno.readFile(localPath);
@@ -258,8 +321,12 @@ Deno.test('fastPut: uploads local file to mock SFTP destination', async () => {
     await Deno.writeFile(localPath, data);
     const mock = createDstMock();
     await new Promise<void>((resolve, reject) => {
-      fastPut(mock as unknown as SFTP, localPath, '/remote/upload.txt', (err) =>
-        err ? reject(err) : resolve());
+      fastPut(
+        mock as unknown as SFTP,
+        localPath,
+        '/remote/upload.txt',
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     const result = mock.assembleData(60);
     assertEquals(result, data);
@@ -275,8 +342,12 @@ Deno.test('fastPut: opts as callback (4th arg is the cb)', async () => {
     await Deno.writeFile(localPath, data);
     const mock = createDstMock();
     await new Promise<void>((resolve, reject) => {
-      fastPut(mock as unknown as SFTP, localPath, '/remote/file.txt', (err) =>
-        err ? reject(err) : resolve());
+      fastPut(
+        mock as unknown as SFTP,
+        localPath,
+        '/remote/file.txt',
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     assertEquals(mock.assembleData(10), data);
   } finally {
@@ -363,8 +434,12 @@ Deno.test('fastPut: empty local file calls callback with null', async () => {
     // Empty file: size=0, fsize=0 → onError() with no error
     const mock = createDstMock();
     await new Promise<void>((resolve, reject) => {
-      fastPut(mock as unknown as SFTP, localPath, '/remote/empty.txt', (err) =>
-        err ? reject(err) : resolve());
+      fastPut(
+        mock as unknown as SFTP,
+        localPath,
+        '/remote/empty.txt',
+        (err) => err ? reject(err) : resolve(),
+      );
     });
     // No written chunks since file was empty
     assertEquals(mock.getWrittenChunks().length, 0);

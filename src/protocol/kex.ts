@@ -8,10 +8,10 @@
  * - Session key derivation
  */
 
-import { allocBytes, concatBytes, fromString, writeUInt32BE } from '../utils/binary.ts';
 import { hash } from '../crypto/hash.ts';
-import { randomBytes } from '../crypto/random.ts';
 import { createKeyExchange, type KeyExchange, type KeyExchangeResult } from '../crypto/kex.ts';
+import { randomBytes } from '../crypto/random.ts';
+import { allocBytes, concatBytes, fromString, writeUInt32BE } from '../utils/binary.ts';
 import {
   CIPHER_INFO,
   DEFAULT_CIPHER,

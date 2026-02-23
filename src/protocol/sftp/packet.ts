@@ -4,10 +4,9 @@
  * Handles binary encoding/decoding of SFTP protocol packets.
  */
 
+import { fromString, readUInt32BE, toUtf8, writeUInt32BE } from '../../utils/binary.ts';
 import { ATTR, REQUEST, RESPONSE } from './constants.ts';
 import type { ExtendedAttribute, FileAttributes, InputAttributes } from './types.ts';
-import { readUInt32BE, writeUInt32BE } from '../../utils/binary.ts';
-import { fromString, toUtf8 } from '../../utils/binary.ts';
 
 /**
  * Reusable buffer for attribute serialization (28 bytes max)

@@ -5,8 +5,8 @@
  */
 
 import { assertEquals, assertThrows } from '@std/assert';
-import { ReadStream, WriteStream } from '../src/protocol/sftp/streams.ts';
 import type { SFTP } from '../src/protocol/sftp/SFTP.ts';
+import { ReadStream, WriteStream } from '../src/protocol/sftp/streams.ts';
 
 // =============================================================================
 // Mock SFTP helpers
@@ -39,7 +39,10 @@ function createReadMockSFTP(data: Uint8Array): MockSFTP {
 /**
  * Create a mock SFTP object that captures writes.
  */
-function createWriteMockSFTP(): { sftp: MockSFTP; written: Array<{ pos: number; data: Uint8Array }> } {
+function createWriteMockSFTP(): {
+  sftp: MockSFTP;
+  written: Array<{ pos: number; data: Uint8Array }>;
+} {
   const written: Array<{ pos: number; data: Uint8Array }> = [];
   const sftp: MockSFTP = {
     open: () => Promise.resolve(new Uint8Array([1])),

@@ -292,7 +292,11 @@ Deno.test('keyParser parses unencrypted PPK RSA key', async () => {
 
   // PPK requires async parsing (MAC verification)
   const result = await parseKey(keyData, '');
-  assertEquals(result instanceof Error, false, `Unexpected error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Unexpected error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   const details = keyToDetails(result);
@@ -483,7 +487,11 @@ Deno.test('keyParser parses encrypted OpenSSH RSA key (aes256-ctr)', async () =>
   );
 
   const result = await parseKey(keyData, PASSPHRASE);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   const details = keyToDetails(result);
@@ -501,7 +509,11 @@ Deno.test('keyParser parses encrypted OpenSSH RSA key (aes128-gcm)', async () =>
   );
 
   const result = await parseKey(keyData, PASSPHRASE);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   const details = keyToDetails(result);
@@ -517,7 +529,11 @@ Deno.test('keyParser parses encrypted OpenSSH ECDSA key (aes256-ctr)', async () 
   );
 
   const result = await parseKey(keyData, PASSPHRASE);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   assertEquals(result.type, expected.type);
@@ -531,7 +547,11 @@ Deno.test('keyParser parses encrypted OpenSSH ECDSA key (aes128-gcm)', async () 
   );
 
   const result = await parseKey(keyData, PASSPHRASE);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   assertEquals(result.type, expected.type);
@@ -572,7 +592,11 @@ Deno.test('keyParser parses encrypted PPK RSA key', async () => {
   );
 
   const result = await parseKey(keyData, PPK_PASSPHRASE);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   assertEquals(result.type, expected.type);
@@ -608,7 +632,11 @@ Deno.test('keyParser parses RFC4716 public key', async () => {
   );
 
   const result = parseKey(keyData);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   const details = keyToDetails(result);
@@ -626,7 +654,11 @@ Deno.test('keyParser parses RFC4716 public key with multi-line comment', async (
   );
 
   const result = parseKey(keyData);
-  assertEquals(result instanceof Error, false, `Error: ${result instanceof Error ? result.message : ''}`);
+  assertEquals(
+    result instanceof Error,
+    false,
+    `Error: ${result instanceof Error ? result.message : ''}`,
+  );
   if (result instanceof Error) return;
 
   const details = keyToDetails(result);
@@ -636,7 +668,9 @@ Deno.test('keyParser parses RFC4716 public key with multi-line comment', async (
 
 Deno.test('keyParser parses all RFC4716 public key fixtures', async () => {
   const files = await listDir(KEY_PARSER_FIXTURES_PATH);
-  const rfc4716Files = files.filter((f) => f.startsWith('rfc4716_') && f.endsWith('.pub') && !f.endsWith('.result'));
+  const rfc4716Files = files.filter((f) =>
+    f.startsWith('rfc4716_') && f.endsWith('.pub') && !f.endsWith('.result')
+  );
 
   for (const name of rfc4716Files) {
     const keyPath = `${KEY_PARSER_FIXTURES_PATH}/${name}`;

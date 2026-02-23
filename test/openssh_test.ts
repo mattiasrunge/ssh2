@@ -11,9 +11,9 @@
 
 import { assertEquals, assertExists } from '@std/assert';
 
+import type { Channel } from '../src/Channel.ts';
 import { Client } from '../src/client.ts';
 import { type Connection, Server, type ServerAuthContext, type Session } from '../src/server.ts';
-import type { Channel } from '../src/Channel.ts';
 import {
   clearMustCallChecks,
   generateTestHostKeyEd25519,

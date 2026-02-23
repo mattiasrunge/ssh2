@@ -7,15 +7,15 @@
 
 import { assertEquals, assertRejects, assertThrows } from '@std/assert';
 import {
+  type Agent,
   AgentContext,
   AgentInboundRequest,
   AgentProtocol,
   BaseAgent,
   isAgent,
-  type Agent,
   type SignOptions,
 } from '../src/agent.ts';
-import { parseKey, type ParsedKey } from '../src/protocol/keyParser.ts';
+import { type ParsedKey, parseKey } from '../src/protocol/keyParser.ts';
 import { writeUInt32BE } from '../src/utils/binary.ts';
 
 // Fixtures path for real key files
@@ -59,7 +59,11 @@ class MockAgent implements Agent {
     return this._keys;
   }
 
-  async sign(_pubKey: ParsedKey | Uint8Array, data: Uint8Array, _opts?: SignOptions): Promise<Uint8Array> {
+  async sign(
+    _pubKey: ParsedKey | Uint8Array,
+    data: Uint8Array,
+    _opts?: SignOptions,
+  ): Promise<Uint8Array> {
     if (this._shouldFail) throw new Error('sign failure');
     return new Uint8Array(data.length); // mock signature
   }
@@ -93,7 +97,10 @@ Deno.test('isAgent returns true for BaseAgent instance', () => {
 });
 
 Deno.test('isAgent returns true for object with getIdentities and sign', () => {
-  const agent = { getIdentities: () => Promise.resolve([]), sign: () => Promise.resolve(new Uint8Array(0)) };
+  const agent = {
+    getIdentities: () => Promise.resolve([]),
+    sign: () => Promise.resolve(new Uint8Array(0)),
+  };
   assertEquals(isAgent(agent), true);
 });
 
@@ -194,7 +201,9 @@ Deno.test('AgentInboundRequest: setResponse / getResponse / hasResponded', () =>
 Deno.test('AgentProtocol server: REQUEST_IDENTITIES emits identities event', () => {
   const proto = new AgentProtocol(false);
   let receivedReq: AgentInboundRequest | null = null;
-  proto.on('identities', (req) => { receivedReq = req; });
+  proto.on('identities', (req) => {
+    receivedReq = req;
+  });
 
   const packet = makePacket(SSH_AGENTC_REQUEST_IDENTITIES);
   const responses = proto.processData(packet);
@@ -216,7 +225,9 @@ Deno.test('AgentProtocol server: unknown message type returns failure', () => {
 Deno.test('AgentProtocol server: partial buffer accumulates then processes', () => {
   const proto = new AgentProtocol(false);
   let eventCount = 0;
-  proto.on('identities', () => { eventCount++; });
+  proto.on('identities', () => {
+    eventCount++;
+  });
 
   const packet = makePacket(SSH_AGENTC_REQUEST_IDENTITIES);
   // Send first 3 bytes (incomplete)
@@ -231,7 +242,9 @@ Deno.test('AgentProtocol server: partial buffer accumulates then processes', () 
 Deno.test('AgentProtocol server: two messages in one buffer', () => {
   const proto = new AgentProtocol(false);
   let eventCount = 0;
-  proto.on('identities', () => { eventCount++; });
+  proto.on('identities', () => {
+    eventCount++;
+  });
 
   const packet1 = makePacket(SSH_AGENTC_REQUEST_IDENTITIES);
   const packet2 = makePacket(SSH_AGENTC_REQUEST_IDENTITIES);
@@ -583,7 +596,9 @@ Deno.test('AgentProtocol server: SIGN_REQUEST with RSA + SHA256 flag sets hash',
 Deno.test('AgentProtocol server: leftover buffer with two messages + partial', () => {
   const proto = new AgentProtocol(false);
   let eventCount = 0;
-  proto.on('identities', () => { eventCount++; });
+  proto.on('identities', () => {
+    eventCount++;
+  });
 
   const packet1 = makePacket(SSH_AGENTC_REQUEST_IDENTITIES);
   const packet2 = makePacket(SSH_AGENTC_REQUEST_IDENTITIES);

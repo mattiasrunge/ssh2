@@ -11,11 +11,8 @@
   "publish": {
     "exclude": [
       "test",
-      "src/grammar/build-parser.ts",
       ".vscode",
-      ".github",
-      "CODE_OF_CONDUCT.md",
-      "CONTRIBUTING.md"
+      ".github"
     ]
   },
   "compilerOptions": {

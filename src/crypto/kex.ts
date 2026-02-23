@@ -6,11 +6,9 @@
  */
 
 import { x25519 } from '@noble/curves/ed25519';
-import { p256 } from '@noble/curves/p256';
-import { p384 } from '@noble/curves/p384';
-import { p521 } from '@noble/curves/p521';
-import { randomBytes } from './random.ts';
+import { p256, p384, p521 } from '@noble/curves/nist';
 import { allocBytes } from '../utils/binary.ts';
+import { randomBytes } from './random.ts';
 
 type NobleCurve = typeof p256;
 

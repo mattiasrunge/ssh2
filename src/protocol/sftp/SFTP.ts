@@ -5,8 +5,8 @@
  * Supports both client and server modes.
  */
 
-import { EventEmitter } from '../../utils/events.ts';
 import { allocBytes, fromString, writeUInt32BE } from '../../utils/binary.ts';
+import { EventEmitter } from '../../utils/events.ts';
 import {
   DEFAULT_MAX_PKT_LEN,
   MAX_REQID,
@@ -28,6 +28,8 @@ import {
   writeUInt64BE,
 } from './packet.ts';
 import { Stats } from './Stats.ts';
+import { ReadStream, WriteStream } from './streams.ts';
+import { fastGet as _fastGet, fastPut as _fastPut } from './transfer.ts';
 import type {
   DirEntry,
   FileAttributes,
@@ -37,16 +39,14 @@ import type {
   ReaddirCallback,
   ReadStreamOptions,
   SFTPConfig,
+  SFTPError,
   SFTPExtensions,
   SFTPHandle,
   StatusCallback,
   TransferOptions,
   WriteStreamOptions,
 } from './types.ts';
-import type { SFTPError } from './types.ts';
 import { stringToFlags } from './types.ts';
-import { ReadStream, WriteStream } from './streams.ts';
-import { fastGet as _fastGet, fastPut as _fastPut } from './transfer.ts';
 
 /**
  * Channel info for SFTP

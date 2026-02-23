@@ -6,6 +6,7 @@
  */
 
 import { assertEquals, assertNotEquals } from '@std/assert';
+import { DISCONNECT_REASON } from '../src/protocol/constants.ts';
 import {
   bufferParser,
   convertSignature,
@@ -18,7 +19,6 @@ import {
   sliceBytes,
   writeUInt32LE,
 } from '../src/protocol/utils.ts';
-import { DISCONNECT_REASON } from '../src/protocol/constants.ts';
 
 // =============================================================================
 // makeError tests
@@ -56,9 +56,15 @@ Deno.test('makeError: string level + explicit fatal=true', () => {
 function makeMockProtocol() {
   const calls: string[] = [];
   return {
-    disconnect(r: number) { calls.push(`disconnect:${r}`); },
-    _destruct() { calls.push('destruct'); },
-    _onError(e: Error) { calls.push(`error:${e.message}`); },
+    disconnect(r: number) {
+      calls.push(`disconnect:${r}`);
+    },
+    _destruct() {
+      calls.push('destruct');
+    },
+    _onError(e: Error) {
+      calls.push(`error:${e.message}`);
+    },
     calls,
   };
 }
@@ -422,9 +428,16 @@ Deno.test('convertSignature: ECDSA with valid ASN.1 input converts to SSH format
   // Manually: 30 0C  02 02 01 02  02 02 03 04
   // (0x30=SEQUENCE, 0x0C=12 bytes length, 0x02=INTEGER, 0x02=2 bytes, etc.)
   const asn1Sig = new Uint8Array([
-    0x30, 0x0C,
-    0x02, 0x02, 0x01, 0x02, // r = [0x01, 0x02]
-    0x02, 0x02, 0x03, 0x04, // s = [0x03, 0x04]
+    0x30,
+    0x0C,
+    0x02,
+    0x02,
+    0x01,
+    0x02, // r = [0x01, 0x02]
+    0x02,
+    0x02,
+    0x03,
+    0x04, // s = [0x03, 0x04]
   ]);
   const result = convertSignature(asn1Sig, 'ecdsa-sha2-nistp256');
   // result should be false on parse failure or Uint8Array on success

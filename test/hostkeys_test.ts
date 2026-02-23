@@ -6,7 +6,6 @@
  */
 
 import { assertEquals } from '@std/assert';
-
 import { Client } from '../src/client.ts';
 import { type Connection, Server, type ServerAuthContext } from '../src/server.ts';
 import {

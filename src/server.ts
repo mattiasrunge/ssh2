@@ -7,9 +7,9 @@
  * @module
  */
 
-import { EventEmitter } from './utils/events.ts';
+import { Channel, type ChannelInfo, MAX_WINDOW, PACKET_SIZE } from './Channel.ts';
+import type { Transport, TransportListener } from './adapters/types.ts';
 import { Protocol, type ProtocolConfig } from './protocol/Protocol.ts';
-import { isParsedKey, type ParsedKey, parseKey } from './protocol/keyParser.ts';
 import {
   CHANNEL_OPEN_FAILURE,
   DEFAULT_CIPHER,
@@ -25,15 +25,15 @@ import {
   SUPPORTED_MAC,
   SUPPORTED_SERVER_HOST_KEY,
 } from './protocol/constants.ts';
-import { Channel, type ChannelInfo, MAX_WINDOW, PACKET_SIZE } from './Channel.ts';
+import { isParsedKey, type ParsedKey, parseKey } from './protocol/keyParser.ts';
 import {
   ChannelManager,
   type ChannelOrCallback,
   generateAlgorithmList,
   onChannelClose,
 } from './utils.ts';
-import type { Transport, TransportListener } from './adapters/types.ts';
 import { allocBytes, writeUInt32BE } from './utils/binary.ts';
+import { EventEmitter } from './utils/events.ts';
 
 const MAX_PENDING_AUTHS = 10;
 

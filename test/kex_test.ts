@@ -15,11 +15,11 @@ import {
   createDefaultOffer,
   deriveSessionKeys,
   getKexHashAlgorithm,
+  type KexAlgorithms,
   KexHandler,
   negotiateAlgorithms,
-  parseKexInit,
-  type KexAlgorithms,
   type NegotiatedAlgorithms,
+  parseKexInit,
 } from '../src/protocol/kex.ts';
 
 // =============================================================================
@@ -173,7 +173,9 @@ Deno.test('negotiateAlgorithms: no matching kex returns Error', () => {
 
 Deno.test('negotiateAlgorithms: no matching host key returns Error', () => {
   const local = makeOffer(['curve25519-sha256'], ['ssh-rsa'], ['aes128-ctr'], ['hmac-sha2-256']);
-  const remote = makeOffer(['curve25519-sha256'], ['ssh-ed25519'], ['aes128-ctr'], ['hmac-sha2-256']);
+  const remote = makeOffer(['curve25519-sha256'], ['ssh-ed25519'], ['aes128-ctr'], [
+    'hmac-sha2-256',
+  ]);
   const result = negotiateAlgorithms(local, remote, false);
   assertInstanceOf(result, Error);
   assertEquals((result as Error).message.includes('host key'), true);
@@ -189,7 +191,12 @@ Deno.test('negotiateAlgorithms: no matching cs cipher returns Error', () => {
   const remote: KexAlgorithms = {
     kex: ['curve25519-sha256'],
     serverHostKey: ['ssh-ed25519'],
-    cs: { cipher: ['aes256-gcm@openssh.com'], mac: ['hmac-sha2-256'], compress: ['none'], lang: [] },
+    cs: {
+      cipher: ['aes256-gcm@openssh.com'],
+      mac: ['hmac-sha2-256'],
+      compress: ['none'],
+      lang: [],
+    },
     sc: { cipher: ['aes128-ctr'], mac: ['hmac-sha2-256'], compress: ['none'], lang: [] },
   };
   const result = negotiateAlgorithms(local, remote, false);
@@ -208,7 +215,12 @@ Deno.test('negotiateAlgorithms: no matching sc cipher returns Error', () => {
     kex: ['curve25519-sha256'],
     serverHostKey: ['ssh-ed25519'],
     cs: { cipher: ['aes128-ctr'], mac: ['hmac-sha2-256'], compress: ['none'], lang: [] },
-    sc: { cipher: ['aes256-gcm@openssh.com'], mac: ['hmac-sha2-256'], compress: ['none'], lang: [] },
+    sc: {
+      cipher: ['aes256-gcm@openssh.com'],
+      mac: ['hmac-sha2-256'],
+      compress: ['none'],
+      lang: [],
+    },
   };
   const result = negotiateAlgorithms(local, remote, false);
   assertInstanceOf(result, Error);
@@ -495,7 +507,9 @@ Deno.test('KexHandler: constructor without offer uses default', () => {
 });
 
 Deno.test('KexHandler: constructor with custom offer uses it', () => {
-  const custom = makeOffer(['curve25519-sha256'], ['ssh-ed25519'], ['aes128-ctr'], ['hmac-sha2-256']);
+  const custom = makeOffer(['curve25519-sha256'], ['ssh-ed25519'], ['aes128-ctr'], [
+    'hmac-sha2-256',
+  ]);
   const handler = new KexHandler(true, custom);
   assertEquals(handler.offer.kex, ['curve25519-sha256']);
 });
@@ -515,7 +529,10 @@ Deno.test('KexHandler: handleKexInit round-trip works', () => {
   const clientPacket = client.generateKexInit();
   const result = server.handleKexInit(clientPacket);
   assertEquals(result instanceof Error, false);
-  const { algorithms, strictKex } = result as { algorithms: NegotiatedAlgorithms; strictKex: boolean };
+  const { algorithms, strictKex } = result as {
+    algorithms: NegotiatedAlgorithms;
+    strictKex: boolean;
+  };
   assertEquals(typeof algorithms.kex, 'string');
   assertEquals(typeof strictKex, 'boolean');
 });
@@ -566,8 +583,18 @@ Deno.test('KexHandler: handleKexInit with no common algo returns Error', () => {
   const incompatible: KexAlgorithms = {
     kex: ['totally-unknown-kex'],
     serverHostKey: ['totally-unknown-hostkey'],
-    cs: { cipher: ['totally-unknown-cipher'], mac: ['totally-unknown-mac'], compress: ['unknown-compress'], lang: [] },
-    sc: { cipher: ['totally-unknown-cipher'], mac: ['totally-unknown-mac'], compress: ['unknown-compress'], lang: [] },
+    cs: {
+      cipher: ['totally-unknown-cipher'],
+      mac: ['totally-unknown-mac'],
+      compress: ['unknown-compress'],
+      lang: [],
+    },
+    sc: {
+      cipher: ['totally-unknown-cipher'],
+      mac: ['totally-unknown-mac'],
+      compress: ['unknown-compress'],
+      lang: [],
+    },
   };
   const packet = buildKexInit(incompatible);
   const result = handler.handleKexInit(packet);

@@ -4,5 +4,5 @@
  * Platform-specific transport implementations for SSH connections.
  */
 
-export * from './types.ts';
 export * from './deno.ts';
+export * from './types.ts';

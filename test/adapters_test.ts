@@ -7,8 +7,8 @@ import {
   connect,
   DenoListener,
   DenoTransport,
-  DenoTransportFactory,
   denoTransport,
+  DenoTransportFactory,
   listen,
 } from '../src/adapters/deno.ts';
 

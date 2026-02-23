@@ -5,8 +5,8 @@
  * Handles SSH window management for flow control.
  */
 
-import { EventEmitter } from './utils/events.ts';
 import { CHANNEL_EXTENDED_DATATYPE } from './protocol/constants.ts';
+import { EventEmitter } from './utils/events.ts';
 
 const STDERR = CHANNEL_EXTENDED_DATATYPE.STDERR;
 

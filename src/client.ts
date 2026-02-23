@@ -5,7 +5,9 @@
  * Supports password, public key, agent, and keyboard-interactive authentication.
  */
 
-import { EventEmitter } from './utils/events.ts';
+import type { Transport } from './adapters/types.ts';
+import { type Agent, AgentContext, createAgent, isAgent } from './agent.ts';
+import { Channel, type ChannelInfo, MAX_WINDOW, PACKET_SIZE } from './Channel.ts';
 import { hash } from './crypto/mod.ts';
 import {
   CHANNEL_EXTENDED_DATATYPE,
@@ -23,10 +25,10 @@ import {
   SUPPORTED_MAC,
   SUPPORTED_SERVER_HOST_KEY,
 } from './protocol/constants.ts';
-import { Protocol, type ProtocolConfig } from './protocol/Protocol.ts';
 import { type ParsedKey, parseKey } from './protocol/keyParser.ts';
+import { Protocol, type ProtocolConfig } from './protocol/Protocol.ts';
+import { SFTP } from './protocol/sftp/mod.ts';
 import { makeBufferParser } from './protocol/utils.ts';
-import { Channel, type ChannelInfo, MAX_WINDOW, PACKET_SIZE } from './Channel.ts';
 import {
   ChannelManager,
   type ChannelOrCallback,
@@ -34,9 +36,7 @@ import {
   onChannelClose,
   onChannelOpenFailure,
 } from './utils.ts';
-import { SFTP } from './protocol/sftp/mod.ts';
-import { type Agent, AgentContext, createAgent, isAgent } from './agent.ts';
-import type { Transport } from './adapters/types.ts';
+import { EventEmitter } from './utils/events.ts';
 
 const STDERR = CHANNEL_EXTENDED_DATATYPE.STDERR;
 const bufferParser = makeBufferParser();

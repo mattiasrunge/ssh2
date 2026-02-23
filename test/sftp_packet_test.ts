@@ -6,9 +6,7 @@
  */
 
 import { assertEquals, assertThrows } from '@std/assert';
-import {
-  ATTR,
-} from '../src/protocol/sftp/constants.ts';
+import { ATTR } from '../src/protocol/sftp/constants.ts';
 import {
   attrsToBytes,
   getAttrBytes,
@@ -114,10 +112,16 @@ Deno.test('writeString: writes string with 4-byte length prefix', () => {
   const end = writeString(buf, 'hello', 0);
   assertEquals(end, 9);
   // Length prefix
-  assertEquals(buf[0], 0); assertEquals(buf[1], 0); assertEquals(buf[2], 0); assertEquals(buf[3], 5);
+  assertEquals(buf[0], 0);
+  assertEquals(buf[1], 0);
+  assertEquals(buf[2], 0);
+  assertEquals(buf[3], 5);
   // 'hello'
-  assertEquals(buf[4], 0x68); assertEquals(buf[5], 0x65); assertEquals(buf[6], 0x6c);
-  assertEquals(buf[7], 0x6c); assertEquals(buf[8], 0x6f);
+  assertEquals(buf[4], 0x68);
+  assertEquals(buf[5], 0x65);
+  assertEquals(buf[6], 0x6c);
+  assertEquals(buf[7], 0x6c);
+  assertEquals(buf[8], 0x6f);
 });
 
 Deno.test('writeString: writes Uint8Array data', () => {
@@ -137,9 +141,13 @@ Deno.test('writeString: writes at non-zero offset', () => {
   // Write 'xy' at offset 7
   writeString(buf, 'xy', 7);
   // Check offset 7: length prefix=2
-  assertEquals(buf[7], 0); assertEquals(buf[8], 0); assertEquals(buf[9], 0); assertEquals(buf[10], 2);
+  assertEquals(buf[7], 0);
+  assertEquals(buf[8], 0);
+  assertEquals(buf[9], 0);
+  assertEquals(buf[10], 2);
   // 'x' and 'y'
-  assertEquals(buf[11], 0x78); assertEquals(buf[12], 0x79);
+  assertEquals(buf[11], 0x78);
+  assertEquals(buf[12], 0x79);
 });
 
 Deno.test('stringByteLength: string counts UTF-8 bytes', () => {

@@ -7,12 +7,12 @@
  */
 
 import { assertEquals } from '@std/assert';
+import { CHANNEL_OPEN_FAILURE, COMPAT, MESSAGE, TERMINAL_MODE } from '../src/protocol/constants.ts';
 import {
   createMessageHandlers,
   type HandlerProtocol,
   type ProtocolHandlers,
 } from '../src/protocol/handlers.ts';
-import { CHANNEL_OPEN_FAILURE, COMPAT, MESSAGE, TERMINAL_MODE } from '../src/protocol/constants.ts';
 
 const enc = new TextEncoder();
 const handlers = createMessageHandlers();
@@ -81,15 +81,33 @@ function mockProtocol(
   const handlerCallbacks: ProtocolHandlers = {};
   // Build proxy handlers that record calls
   const handlerNames: (keyof ProtocolHandlers)[] = [
-    'DISCONNECT', 'DEBUG', 'SERVICE_REQUEST', 'SERVICE_ACCEPT', 'EXT_INFO',
-    'USERAUTH_REQUEST', 'USERAUTH_FAILURE', 'USERAUTH_SUCCESS', 'USERAUTH_BANNER',
-    'USERAUTH_PASSWD_CHANGEREQ', 'USERAUTH_PK_OK', 'USERAUTH_INFO_REQUEST',
+    'DISCONNECT',
+    'DEBUG',
+    'SERVICE_REQUEST',
+    'SERVICE_ACCEPT',
+    'EXT_INFO',
+    'USERAUTH_REQUEST',
+    'USERAUTH_FAILURE',
+    'USERAUTH_SUCCESS',
+    'USERAUTH_BANNER',
+    'USERAUTH_PASSWD_CHANGEREQ',
+    'USERAUTH_PK_OK',
+    'USERAUTH_INFO_REQUEST',
     'USERAUTH_INFO_RESPONSE',
-    'GLOBAL_REQUEST', 'REQUEST_SUCCESS', 'REQUEST_FAILURE',
-    'CHANNEL_OPEN', 'CHANNEL_OPEN_CONFIRMATION', 'CHANNEL_OPEN_FAILURE',
-    'CHANNEL_WINDOW_ADJUST', 'CHANNEL_DATA', 'CHANNEL_EXTENDED_DATA',
-    'CHANNEL_EOF', 'CHANNEL_CLOSE', 'CHANNEL_REQUEST',
-    'CHANNEL_SUCCESS', 'CHANNEL_FAILURE',
+    'GLOBAL_REQUEST',
+    'REQUEST_SUCCESS',
+    'REQUEST_FAILURE',
+    'CHANNEL_OPEN',
+    'CHANNEL_OPEN_CONFIRMATION',
+    'CHANNEL_OPEN_FAILURE',
+    'CHANNEL_WINDOW_ADJUST',
+    'CHANNEL_DATA',
+    'CHANNEL_EXTENDED_DATA',
+    'CHANNEL_EOF',
+    'CHANNEL_CLOSE',
+    'CHANNEL_REQUEST',
+    'CHANNEL_SUCCESS',
+    'CHANNEL_FAILURE',
   ];
   for (const name of handlerNames) {
     // deno-lint-ignore no-explicit-any
@@ -115,8 +133,12 @@ function mockProtocol(
     // doFatalError calls these:
     disconnect(_reason: number) {},
     _destruct() {},
-    _onError(err: Error) { errors.push(err.message); },
-    requestFailure() { calls.push({ name: 'requestFailure', args: [] }); },
+    _onError(err: Error) {
+      errors.push(err.message);
+    },
+    requestFailure() {
+      calls.push({ name: 'requestFailure', args: [] });
+    },
     channelOpenFail(recipient: number, reason: number, desc: string, lang: string) {
       calls.push({ name: 'channelOpenFail', args: [recipient, reason, desc, lang] });
     },
@@ -131,7 +153,8 @@ function mockProtocol(
 
 Deno.test('DISCONNECT: valid packet calls handler', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.DISCONNECT,
+  const p = payload(
+    MESSAGE.DISCONNECT,
     uint32BE(11), // reason: CONNECTION_LOST
     sshString('connection lost'),
     sshString('en'),
@@ -180,11 +203,7 @@ Deno.test('UNIMPLEMENTED: truncated packet triggers fatal error', () => {
 
 Deno.test('DEBUG: valid packet calls handler', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.DEBUG,
-    bool(true),
-    sshString('debug message'),
-    sshString('en'),
-  );
+  const p = payload(MESSAGE.DEBUG, bool(true), sshString('debug message'), sshString('en'));
   handlers[MESSAGE.DEBUG](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].name, 'DEBUG');
@@ -237,7 +256,8 @@ Deno.test('SERVICE_ACCEPT: truncated packet triggers fatal error', () => {
 Deno.test('EXT_INFO: server-sig-algs extension parsed', () => {
   const { proto, calls } = mockProtocol();
   const algsData = enc.encode('rsa-sha2-256,rsa-sha2-512');
-  const p = payload(MESSAGE.EXT_INFO,
+  const p = payload(
+    MESSAGE.EXT_INFO,
     uint32BE(1), // 1 extension
     sshString('server-sig-algs'),
     sshBytes(algsData),
@@ -252,7 +272,8 @@ Deno.test('EXT_INFO: server-sig-algs extension parsed', () => {
 
 Deno.test('EXT_INFO: unknown extension is skipped but still parsed', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.EXT_INFO,
+  const p = payload(
+    MESSAGE.EXT_INFO,
     uint32BE(1),
     sshString('some-unknown-ext'),
     sshBytes(new Uint8Array([1, 2, 3])),
@@ -277,7 +298,8 @@ Deno.test('EXT_INFO: truncated packet triggers fatal error', () => {
 
 Deno.test('USERAUTH_REQUEST: none method', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.USERAUTH_REQUEST,
+  const p = payload(
+    MESSAGE.USERAUTH_REQUEST,
     sshString('alice'),
     sshString('ssh-connection'),
     sshString('none'),
@@ -294,7 +316,8 @@ Deno.test('USERAUTH_REQUEST: none method', () => {
 
 Deno.test('USERAUTH_REQUEST: password method', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.USERAUTH_REQUEST,
+  const p = payload(
+    MESSAGE.USERAUTH_REQUEST,
     sshString('bob'),
     sshString('ssh-connection'),
     sshString('password'),
@@ -309,7 +332,8 @@ Deno.test('USERAUTH_REQUEST: password method', () => {
 
 Deno.test('USERAUTH_REQUEST: password change', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.USERAUTH_REQUEST,
+  const p = payload(
+    MESSAGE.USERAUTH_REQUEST,
     sshString('bob'),
     sshString('ssh-connection'),
     sshString('password'),
@@ -324,7 +348,8 @@ Deno.test('USERAUTH_REQUEST: password change', () => {
 
 Deno.test('USERAUTH_REQUEST: keyboard-interactive method', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.USERAUTH_REQUEST,
+  const p = payload(
+    MESSAGE.USERAUTH_REQUEST,
     sshString('alice'),
     sshString('ssh-connection'),
     sshString('keyboard-interactive'),
@@ -339,7 +364,8 @@ Deno.test('USERAUTH_REQUEST: keyboard-interactive method', () => {
 Deno.test('USERAUTH_REQUEST: unknown method with raw data', () => {
   const { proto, calls } = mockProtocol();
   const rawData = new Uint8Array([0xaa, 0xbb, 0xcc]);
-  const p = payload(MESSAGE.USERAUTH_REQUEST,
+  const p = payload(
+    MESSAGE.USERAUTH_REQUEST,
     sshString('alice'),
     sshString('ssh-connection'),
     sshString('custom-method'),
@@ -360,10 +386,7 @@ Deno.test('USERAUTH_REQUEST: truncated packet triggers fatal error', () => {
 
 Deno.test('USERAUTH_FAILURE: valid packet', () => {
   const { proto, calls } = mockProtocol(undefined, { authsQueue: ['password'] });
-  const p = payload(MESSAGE.USERAUTH_FAILURE,
-    sshString('publickey,password'),
-    bool(false),
-  );
+  const p = payload(MESSAGE.USERAUTH_FAILURE, sshString('publickey,password'), bool(false));
   handlers[MESSAGE.USERAUTH_FAILURE](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].name, 'USERAUTH_FAILURE');
@@ -391,10 +414,7 @@ Deno.test('USERAUTH_SUCCESS: calls handler and shifts authsQueue', () => {
 
 Deno.test('USERAUTH_BANNER: valid packet', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.USERAUTH_BANNER,
-    sshString('Welcome!'),
-    sshString('en'),
-  );
+  const p = payload(MESSAGE.USERAUTH_BANNER, sshString('Welcome!'), sshString('en'));
   handlers[MESSAGE.USERAUTH_BANNER](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].name, 'USERAUTH_BANNER');
@@ -423,10 +443,7 @@ Deno.test('type 60: empty authsQueue is silently ignored', () => {
 
 Deno.test('type 60 password: USERAUTH_PASSWD_CHANGEREQ', () => {
   const { proto, calls } = mockProtocol(undefined, { authsQueue: ['password'] });
-  const p = payload(60,
-    sshString('Please change your password'),
-    sshString('en'),
-  );
+  const p = payload(60, sshString('Please change your password'), sshString('en'));
   handlers[60](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].name, 'USERAUTH_PASSWD_CHANGEREQ');
@@ -444,10 +461,7 @@ Deno.test('type 60 password: malformed triggers fatal error', () => {
 Deno.test('type 60 publickey: USERAUTH_PK_OK', () => {
   const { proto, calls } = mockProtocol(undefined, { authsQueue: ['publickey'] });
   const keyData = new Uint8Array([0x00, 0x00, 0x00, 0x07, ...enc.encode('ssh-rsa'), 0x01]);
-  const p = payload(60,
-    sshString('ssh-rsa'),
-    sshBytes(keyData),
-  );
+  const p = payload(60, sshString('ssh-rsa'), sshBytes(keyData));
   handlers[60](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].name, 'USERAUTH_PK_OK');
@@ -466,7 +480,8 @@ Deno.test('type 60 publickey: malformed triggers fatal error', () => {
 
 Deno.test('type 60 keyboard-interactive: USERAUTH_INFO_REQUEST', () => {
   const { proto, calls } = mockProtocol(undefined, { authsQueue: ['keyboard-interactive'] });
-  const p = payload(60,
+  const p = payload(
+    60,
     sshString('Auth Name'),
     sshString('Please enter code'),
     sshString('en'), // lang
@@ -484,7 +499,8 @@ Deno.test('type 60 keyboard-interactive: USERAUTH_INFO_REQUEST', () => {
 
 Deno.test('type 60 keyboard-interactive: malformed triggers fatal error', () => {
   const { proto, errors } = mockProtocol(undefined, { authsQueue: ['keyboard-interactive'] });
-  const p = payload(60,
+  const p = payload(
+    60,
     sshString('Auth Name'),
     sshString('instr'),
     sshString('en'),
@@ -526,7 +542,8 @@ Deno.test('type 61: wrong auth method triggers fatal error', () => {
 
 Deno.test('type 61 keyboard-interactive: USERAUTH_INFO_RESPONSE', () => {
   const { proto, calls } = mockProtocol(undefined, { authsQueue: ['keyboard-interactive'] });
-  const p = payload(61,
+  const p = payload(
+    61,
     uint32BE(2), // 2 responses
     sshString('answer1'),
     sshString('answer2'),
@@ -539,7 +556,8 @@ Deno.test('type 61 keyboard-interactive: USERAUTH_INFO_RESPONSE', () => {
 
 Deno.test('type 61 keyboard-interactive: malformed triggers fatal error', () => {
   const { proto, errors } = mockProtocol(undefined, { authsQueue: ['keyboard-interactive'] });
-  const p = payload(61,
+  const p = payload(
+    61,
     uint32BE(2), // claims 2 responses
     sshString('only-one'),
   );
@@ -554,7 +572,8 @@ Deno.test('type 61 keyboard-interactive: malformed triggers fatal error', () => 
 
 Deno.test('GLOBAL_REQUEST: tcpip-forward', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
+  const p = payload(
+    MESSAGE.GLOBAL_REQUEST,
     sshString('tcpip-forward'),
     bool(true),
     sshString('0.0.0.0'),
@@ -570,7 +589,8 @@ Deno.test('GLOBAL_REQUEST: tcpip-forward', () => {
 
 Deno.test('GLOBAL_REQUEST: cancel-tcpip-forward', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
+  const p = payload(
+    MESSAGE.GLOBAL_REQUEST,
     sshString('cancel-tcpip-forward'),
     bool(false),
     sshString('127.0.0.1'),
@@ -584,7 +604,8 @@ Deno.test('GLOBAL_REQUEST: cancel-tcpip-forward', () => {
 
 Deno.test('GLOBAL_REQUEST: streamlocal-forward@openssh.com', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
+  const p = payload(
+    MESSAGE.GLOBAL_REQUEST,
     sshString('streamlocal-forward@openssh.com'),
     bool(true),
     sshString('/tmp/test.sock'),
@@ -596,10 +617,7 @@ Deno.test('GLOBAL_REQUEST: streamlocal-forward@openssh.com', () => {
 
 Deno.test('GLOBAL_REQUEST: no-more-sessions@openssh.com', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
-    sshString('no-more-sessions@openssh.com'),
-    bool(false),
-  );
+  const p = payload(MESSAGE.GLOBAL_REQUEST, sshString('no-more-sessions@openssh.com'), bool(false));
   handlers[MESSAGE.GLOBAL_REQUEST](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].args[2], null);
@@ -608,11 +626,7 @@ Deno.test('GLOBAL_REQUEST: no-more-sessions@openssh.com', () => {
 Deno.test('GLOBAL_REQUEST: unknown type passes raw data', () => {
   const { proto, calls } = mockProtocol();
   const rawData = new Uint8Array([0xde, 0xad]);
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
-    sshString('custom-request'),
-    bool(true),
-    rawData,
-  );
+  const p = payload(MESSAGE.GLOBAL_REQUEST, sshString('custom-request'), bool(true), rawData);
   handlers[MESSAGE.GLOBAL_REQUEST](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].args[0], 'custom-request');
@@ -620,7 +634,8 @@ Deno.test('GLOBAL_REQUEST: unknown type passes raw data', () => {
 
 Deno.test('GLOBAL_REQUEST: no handler calls requestFailure', () => {
   const { proto, calls } = mockProtocol({ GLOBAL_REQUEST: undefined });
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
+  const p = payload(
+    MESSAGE.GLOBAL_REQUEST,
     sshString('tcpip-forward'),
     bool(true),
     sshString('0.0.0.0'),
@@ -633,7 +648,8 @@ Deno.test('GLOBAL_REQUEST: no handler calls requestFailure', () => {
 
 Deno.test('GLOBAL_REQUEST: malformed triggers fatal error', () => {
   const { proto, errors } = mockProtocol();
-  const p = payload(MESSAGE.GLOBAL_REQUEST,
+  const p = payload(
+    MESSAGE.GLOBAL_REQUEST,
     sshString('tcpip-forward'),
     bool(true),
     sshString('0.0.0.0'),
@@ -675,7 +691,8 @@ Deno.test('REQUEST_FAILURE: calls handler', () => {
 
 Deno.test('CHANNEL_OPEN: session (default type)', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_OPEN,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN,
     sshString('session'),
     uint32BE(0), // sender
     uint32BE(2097152), // window
@@ -693,7 +710,8 @@ Deno.test('CHANNEL_OPEN: session (default type)', () => {
 
 Deno.test('CHANNEL_OPEN: direct-tcpip', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_OPEN,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN,
     sshString('direct-tcpip'),
     uint32BE(1),
     uint32BE(65536),
@@ -707,14 +725,17 @@ Deno.test('CHANNEL_OPEN: direct-tcpip', () => {
   assertEquals(calls.length, 1);
   assertEquals(calls[0].args[0].type, 'direct-tcpip');
   assertEquals(calls[0].args[0].data, {
-    destIP: '192.168.1.1', destPort: 80,
-    srcIP: '10.0.0.1', srcPort: 12345,
+    destIP: '192.168.1.1',
+    destPort: 80,
+    srcIP: '10.0.0.1',
+    srcPort: 12345,
   });
 });
 
 Deno.test('CHANNEL_OPEN: forwarded-streamlocal@openssh.com', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_OPEN,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN,
     sshString('forwarded-streamlocal@openssh.com'),
     uint32BE(2),
     uint32BE(65536),
@@ -729,7 +750,8 @@ Deno.test('CHANNEL_OPEN: forwarded-streamlocal@openssh.com', () => {
 
 Deno.test('CHANNEL_OPEN: x11', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_OPEN,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN,
     sshString('x11'),
     uint32BE(3),
     uint32BE(65536),
@@ -745,7 +767,8 @@ Deno.test('CHANNEL_OPEN: x11', () => {
 
 Deno.test('CHANNEL_OPEN: no handler calls channelOpenFail', () => {
   const { proto, calls } = mockProtocol({ CHANNEL_OPEN: undefined });
-  const p = payload(MESSAGE.CHANNEL_OPEN,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN,
     sshString('session'),
     uint32BE(5),
     uint32BE(65536),
@@ -768,7 +791,8 @@ Deno.test('CHANNEL_OPEN: malformed triggers fatal error', () => {
 
 Deno.test('CHANNEL_OPEN_CONFIRMATION: valid', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_OPEN_CONFIRMATION,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN_CONFIRMATION,
     uint32BE(0), // recipient
     uint32BE(1), // sender
     uint32BE(2097152), // window
@@ -786,7 +810,8 @@ Deno.test('CHANNEL_OPEN_CONFIRMATION: valid', () => {
 Deno.test('CHANNEL_OPEN_CONFIRMATION: with extra data', () => {
   const { proto, calls } = mockProtocol();
   const extraData = new Uint8Array([0xaa, 0xbb]);
-  const p = payload(MESSAGE.CHANNEL_OPEN_CONFIRMATION,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN_CONFIRMATION,
     uint32BE(0),
     uint32BE(1),
     uint32BE(65536),
@@ -808,7 +833,8 @@ Deno.test('CHANNEL_OPEN_CONFIRMATION: malformed triggers fatal error', () => {
 
 Deno.test('CHANNEL_OPEN_FAILURE: valid', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_OPEN_FAILURE,
+  const p = payload(
+    MESSAGE.CHANNEL_OPEN_FAILURE,
     uint32BE(0), // recipient
     uint32BE(2), // reason: CONNECT_FAILED
     sshString('Connection refused'),
@@ -832,10 +858,7 @@ Deno.test('CHANNEL_OPEN_FAILURE: malformed triggers fatal error', () => {
 
 Deno.test('CHANNEL_WINDOW_ADJUST: valid', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_WINDOW_ADJUST,
-    uint32BE(3),
-    uint32BE(131072),
-  );
+  const p = payload(MESSAGE.CHANNEL_WINDOW_ADJUST, uint32BE(3), uint32BE(131072));
   handlers[MESSAGE.CHANNEL_WINDOW_ADJUST](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].name, 'CHANNEL_WINDOW_ADJUST');
@@ -873,7 +896,8 @@ Deno.test('CHANNEL_DATA: malformed triggers fatal error', () => {
 Deno.test('CHANNEL_EXTENDED_DATA: valid', () => {
   const { proto, calls } = mockProtocol();
   const data = new Uint8Array([0x45, 0x72, 0x72]); // "Err"
-  const p = payload(MESSAGE.CHANNEL_EXTENDED_DATA,
+  const p = payload(
+    MESSAGE.CHANNEL_EXTENDED_DATA,
     uint32BE(1), // recipient
     uint32BE(1), // type: SSH_EXTENDED_DATA_STDERR
     sshBytes(data),
@@ -968,7 +992,8 @@ Deno.test('CHANNEL_FAILURE: malformed triggers fatal error', () => {
 
 Deno.test('CHANNEL_REQUEST: exit-status', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('exit-status'),
     bool(false),
@@ -985,7 +1010,8 @@ Deno.test('CHANNEL_REQUEST: exit-status', () => {
 
 Deno.test('CHANNEL_REQUEST: exit-signal (normal)', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('exit-signal'),
     bool(false),
@@ -1006,7 +1032,8 @@ Deno.test('CHANNEL_REQUEST: exit-signal (normal)', () => {
 
 Deno.test('CHANNEL_REQUEST: exit-signal with OLD_EXIT compat', () => {
   const { proto, calls } = mockProtocol(undefined, { compatFlags: COMPAT.OLD_EXIT });
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('exit-signal'),
     bool(false),
@@ -1025,7 +1052,8 @@ Deno.test('CHANNEL_REQUEST: exit-signal with OLD_EXIT compat', () => {
 
 Deno.test('CHANNEL_REQUEST: exit-signal OLD_EXIT unknown signal number', () => {
   const { proto, calls } = mockProtocol(undefined, { compatFlags: COMPAT.OLD_EXIT });
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('exit-signal'),
     bool(false),
@@ -1042,10 +1070,15 @@ Deno.test('CHANNEL_REQUEST: pty-req with terminal modes', () => {
   const { proto, calls } = mockProtocol();
   // Build terminal modes: VINTR=3, TTY_OP_END
   const modes = new Uint8Array([
-    TERMINAL_MODE.VINTR, 0, 0, 0, 3, // VINTR = 3
+    TERMINAL_MODE.VINTR,
+    0,
+    0,
+    0,
+    3, // VINTR = 3
     TERMINAL_MODE.TTY_OP_END,
   ]);
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('pty-req'),
     bool(true),
@@ -1071,7 +1104,8 @@ Deno.test('CHANNEL_REQUEST: pty-req with terminal modes', () => {
 
 Deno.test('CHANNEL_REQUEST: window-change', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('window-change'),
     bool(false),
@@ -1088,7 +1122,8 @@ Deno.test('CHANNEL_REQUEST: window-change', () => {
 Deno.test('CHANNEL_REQUEST: x11-req', () => {
   const { proto, calls } = mockProtocol();
   const cookie = new Uint8Array([0xaa, 0xbb, 0xcc, 0xdd]);
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('x11-req'),
     bool(true),
@@ -1107,7 +1142,8 @@ Deno.test('CHANNEL_REQUEST: x11-req', () => {
 
 Deno.test('CHANNEL_REQUEST: env', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('env'),
     bool(true),
@@ -1121,11 +1157,7 @@ Deno.test('CHANNEL_REQUEST: env', () => {
 
 Deno.test('CHANNEL_REQUEST: shell', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
-    uint32BE(0),
-    sshString('shell'),
-    bool(true),
-  );
+  const p = payload(MESSAGE.CHANNEL_REQUEST, uint32BE(0), sshString('shell'), bool(true));
   handlers[MESSAGE.CHANNEL_REQUEST](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].args[1], 'shell');
@@ -1134,7 +1166,8 @@ Deno.test('CHANNEL_REQUEST: shell', () => {
 
 Deno.test('CHANNEL_REQUEST: exec', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('exec'),
     bool(true),
@@ -1148,7 +1181,8 @@ Deno.test('CHANNEL_REQUEST: exec', () => {
 
 Deno.test('CHANNEL_REQUEST: subsystem', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('subsystem'),
     bool(true),
@@ -1162,7 +1196,8 @@ Deno.test('CHANNEL_REQUEST: subsystem', () => {
 
 Deno.test('CHANNEL_REQUEST: signal', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('signal'),
     bool(false),
@@ -1176,7 +1211,8 @@ Deno.test('CHANNEL_REQUEST: signal', () => {
 
 Deno.test('CHANNEL_REQUEST: xon-xoff', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('xon-xoff'),
     bool(false),
@@ -1190,7 +1226,8 @@ Deno.test('CHANNEL_REQUEST: xon-xoff', () => {
 
 Deno.test('CHANNEL_REQUEST: auth-agent-req@openssh.com', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('auth-agent-req@openssh.com'),
     bool(true),
@@ -1203,7 +1240,8 @@ Deno.test('CHANNEL_REQUEST: auth-agent-req@openssh.com', () => {
 
 Deno.test('CHANNEL_REQUEST: unknown type with remaining data', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
+  const p = payload(
+    MESSAGE.CHANNEL_REQUEST,
     uint32BE(0),
     sshString('custom-type'),
     bool(false),
@@ -1216,11 +1254,7 @@ Deno.test('CHANNEL_REQUEST: unknown type with remaining data', () => {
 
 Deno.test('CHANNEL_REQUEST: unknown type without remaining data', () => {
   const { proto, calls } = mockProtocol();
-  const p = payload(MESSAGE.CHANNEL_REQUEST,
-    uint32BE(0),
-    sshString('empty-type'),
-    bool(false),
-  );
+  const p = payload(MESSAGE.CHANNEL_REQUEST, uint32BE(0), sshString('empty-type'), bool(false));
   handlers[MESSAGE.CHANNEL_REQUEST](proto, p);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].args[3], null);

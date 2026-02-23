@@ -10,8 +10,8 @@ import {
   type ChannelClient,
   MAX_WINDOW,
   PACKET_SIZE,
-  windowAdjust,
   WINDOW_THRESHOLD,
+  windowAdjust,
 } from '../src/Channel.ts';
 
 // =============================================================================
@@ -217,7 +217,9 @@ Deno.test('Channel: eof sends channelEOF and emits eof event', () => {
   const client = createMockClient();
   const chan = new Channel(client, makeInfo());
   let eofCount = 0;
-  chan.on('eof', () => { eofCount++; });
+  chan.on('eof', () => {
+    eofCount++;
+  });
 
   chan.eof();
 
@@ -239,7 +241,9 @@ Deno.test('Channel: handleEOF closes readableController and emits end', () => {
   const client = createMockClient();
   const chan = new Channel(client, makeInfo());
   let endCount = 0;
-  chan.on('end', () => { endCount++; });
+  chan.on('end', () => {
+    endCount++;
+  });
 
   chan.handleEOF();
 
@@ -273,7 +277,9 @@ Deno.test('Channel: handleClose sets both states to closed and emits close', () 
   const client = createMockClient();
   const chan = new Channel(client, makeInfo());
   let closeCount = 0;
-  chan.on('close', () => { closeCount++; });
+  chan.on('close', () => {
+    closeCount++;
+  });
 
   chan.handleClose();
 
@@ -321,7 +327,9 @@ Deno.test('Channel: adjustWindow emits drain when waitWindow was true', () => {
   const client = createMockClient();
   const chan = new Channel(client, makeInfo());
   let drainCount = 0;
-  chan.on('drain', () => { drainCount++; });
+  chan.on('drain', () => {
+    drainCount++;
+  });
 
   // Simulate window exhaustion
   chan.outgoing.window = 0;
@@ -435,7 +443,9 @@ Deno.test('Channel: handleExitStatus sets exitInfo.code and emits exit-status', 
   const client = createMockClient();
   const chan = new Channel(client, makeInfo());
   let receivedCode = -1;
-  chan.on('exit-status', (code) => { receivedCode = code; });
+  chan.on('exit-status', (code) => {
+    receivedCode = code;
+  });
 
   chan.handleExitStatus(42);
 
@@ -698,7 +708,9 @@ Deno.test('Channel: adjustWindow flushes pending stderr data', () => {
   stderrWritable.write(new Uint8Array([0xee]));
 
   let drainCount = 0;
-  chan.on('drain', () => { drainCount++; });
+  chan.on('drain', () => {
+    drainCount++;
+  });
   chan.adjustWindow(100);
 
   assertEquals(drainCount, 1);
@@ -715,7 +727,12 @@ Deno.test('Channel: write does nothing when outgoing id is undefined', () => {
   const info = {
     type: 'session',
     incoming: { id: 1, window: MAX_WINDOW, packetSize: PACKET_SIZE, state: 'open' as const },
-    outgoing: { id: undefined as unknown as number, window: MAX_WINDOW, packetSize: PACKET_SIZE, state: 'open' as const },
+    outgoing: {
+      id: undefined as unknown as number,
+      window: MAX_WINDOW,
+      packetSize: PACKET_SIZE,
+      state: 'open' as const,
+    },
   };
   const chan = new Channel(client, info);
 

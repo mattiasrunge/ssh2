@@ -5,9 +5,7 @@
  * Handles parsing, packet assembly, encryption, and message routing.
  */
 
-import { allocBytes, concatBytes, fromString, toUtf8, writeUInt32BE } from '../utils/binary.ts';
-import { EventEmitter } from '../utils/events.ts';
-import { CIPHER_INFO, COMPAT_CHECKS, DISCONNECT_REASON, MAC_INFO, MESSAGE } from './constants.ts';
+import type { AgentContext } from '../agent.ts';
 import {
   type Cipher as CipherType,
   createCipher,
@@ -16,13 +14,15 @@ import {
   NullCipher as CipherNullCipher,
   NullDecipher as CipherNullDecipher,
 } from '../crypto/ciphers.ts';
-import type { FatalErrorProtocol } from './utils.ts';
 import { Ber, BerWriter } from '../utils/ber.ts';
-import { PacketReader, PacketWriter, ZlibCompressor, ZlibDecompressor } from './zlib.ts';
-import { createDefaultOffer, type KexAlgorithms, KexHandler, type SessionKeys } from './kex.ts';
+import { allocBytes, concatBytes, fromString, toUtf8, writeUInt32BE } from '../utils/binary.ts';
+import { EventEmitter } from '../utils/events.ts';
+import { CIPHER_INFO, COMPAT_CHECKS, DISCONNECT_REASON, MAC_INFO, MESSAGE } from './constants.ts';
 import { type HandlerProtocol, MESSAGE_HANDLERS, type ProtocolHandlers } from './handlers.ts';
+import { createDefaultOffer, type KexAlgorithms, KexHandler, type SessionKeys } from './kex.ts';
 import type { ParsedKey } from './keyParser.ts';
-import type { AgentContext } from '../agent.ts';
+import type { FatalErrorProtocol } from './utils.ts';
+import { PacketReader, PacketWriter, ZlibCompressor, ZlibDecompressor } from './zlib.ts';
 
 const MODULE_VER = '2.0.0';
 const IDENT_RAW = fromString(`SSH-2.0-ssh2js${MODULE_VER}`);
@@ -1821,7 +1821,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   }
 
   // ============================================================================
-  // Service and Authentication Methods (TODO: Full implementation)
+  // Service and Authentication Methods
   // ============================================================================
 
   /**
