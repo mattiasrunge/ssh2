@@ -75,6 +75,10 @@ This fork is a complete rewrite of ssh2 for the Deno ecosystem. The major change
 - **No HTTPAgent/HTTPSAgent**: These Node.js-specific http.Agent wrappers have been removed.
 - **No native bindings**: The `cpu-features` and C++ crypto bindings have been removed. All
   cryptography is done in pure TypeScript using `@noble/curves` and `@noble/ciphers`.
+- **No encrypted old-style PEM keys**: Legacy PEM keys encrypted with `Proc-Type: 4,ENCRYPTED`
+  (using MD5-based EVP_BytesToKey derivation) are not supported. Convert them to the modern OpenSSH
+  format with: `ssh-keygen -p -o -f <keyfile>`. Encrypted new-format OpenSSH keys, PPK keys, and
+  all unencrypted PEM keys are fully supported.
 - **Strict KEX mode**: Implements RFC 9700 (strict key exchange) for OpenSSH 9.x compatibility.
 - **Uint8Array instead of Buffer**: All binary data uses `Uint8Array` instead of Node.js `Buffer`.
 

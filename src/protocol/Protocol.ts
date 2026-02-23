@@ -541,7 +541,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     } else {
       this._debug?.(`Inbound: Unhandled message type ${type}`);
       // Send UNIMPLEMENTED for unknown messages
-      this._sendUnimplemented(0); // TODO: track sequence numbers
+      this._sendUnimplemented(this._decipher?.inSeqno ?? 0);
     }
   }
 

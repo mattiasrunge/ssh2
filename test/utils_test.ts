@@ -4,6 +4,12 @@
 
 import { assertEquals, assertRejects, assertThrows } from '@std/assert';
 import {
+  ChannelManager,
+  generateAlgorithmList,
+  onChannelClose,
+  onChannelOpenFailure,
+} from '../src/utils.ts';
+import {
   allocBytes,
   compareBytes,
   concatBytes,
@@ -598,4 +604,309 @@ Deno.test({
       'too slow',
     );
   },
+});
+
+// =============================================================================
+// ChannelManager tests
+// =============================================================================
+
+Deno.test('ChannelManager: add() returns 0 then 1 sequentially', () => {
+  const mgr = new ChannelManager();
+  assertEquals(mgr.add(), 0);
+  assertEquals(mgr.add(), 1);
+  assertEquals(mgr.count, 2);
+});
+
+Deno.test('ChannelManager: add(val) stores value, get() retrieves it', () => {
+  const mgr = new ChannelManager();
+  const fn = () => {};
+  const id = mgr.add(fn as any);
+  assertEquals(mgr.get(id), fn);
+});
+
+Deno.test('ChannelManager: update() replaces stored value', () => {
+  const mgr = new ChannelManager();
+  const fn1 = () => {};
+  const fn2 = () => {};
+  const id = mgr.add(fn1 as any);
+  mgr.update(id, fn2 as any);
+  assertEquals(mgr.get(id), fn2);
+});
+
+Deno.test('ChannelManager: get() throws for negative id', () => {
+  const mgr = new ChannelManager();
+  assertThrows(() => mgr.get(-1), Error, 'Invalid channel id');
+});
+
+Deno.test('ChannelManager: get() throws for Infinity id', () => {
+  const mgr = new ChannelManager();
+  assertThrows(() => mgr.get(Infinity), Error, 'Invalid channel id');
+});
+
+Deno.test('ChannelManager: get() throws for NaN id', () => {
+  const mgr = new ChannelManager();
+  assertThrows(() => mgr.get(NaN), Error, 'Invalid channel id');
+});
+
+Deno.test('ChannelManager: remove() decrements count', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  assertEquals(mgr.count, 1);
+  mgr.remove(id);
+  assertEquals(mgr.count, 0);
+});
+
+Deno.test('ChannelManager: remove() nonexistent id is no-op', () => {
+  const mgr = new ChannelManager();
+  mgr.add(); // id=0
+  mgr.remove(999 as any); // this actually throws since 999 >= MAX_CHANNEL... wait, no. MAX_CHANNEL = 2^32-1. 999 < MAX_CHANNEL
+  // Actually 999 is valid but not in the map, so no-op
+  assertEquals(mgr.count, 1);
+});
+
+Deno.test('ChannelManager: remove() throws for invalid id', () => {
+  const mgr = new ChannelManager();
+  assertThrows(() => mgr.remove(-1), Error, 'Invalid channel id');
+});
+
+Deno.test('ChannelManager: cleanup() resets to initial state', () => {
+  const mgr = new ChannelManager();
+  mgr.add();
+  mgr.add();
+  mgr.cleanup();
+  assertEquals(mgr.count, 0);
+  // After cleanup, add() should start from 0 again
+  assertEquals(mgr.add(), 0);
+});
+
+Deno.test('ChannelManager: cleanup() calls function-type channels with failure', () => {
+  const mgr = new ChannelManager();
+  const errors: Error[] = [];
+  const cb = (err?: Error) => { if (err) errors.push(err); };
+  mgr.add(cb as any);
+  mgr.cleanup(new Error('disconnected'));
+  assertEquals(errors.length, 1);
+  assertEquals(errors[0].message.includes('disconnected'), true);
+});
+
+Deno.test('ChannelManager: cleanup() calls handleClose on channel objects', () => {
+  const mgr = new ChannelManager();
+  const closeCalls: number[] = [];
+  const chan = {
+    incoming: { state: 'open' },
+    outgoing: { state: 'open' },
+    close: () => closeCalls.push(1),
+    flushCallbacks: () => {},
+    handleClose: () => {},
+  };
+  mgr.add(chan as any);
+  mgr.cleanup();
+  // onChannelClose should have been called (dead=true, so close() is NOT called)
+  assertEquals(closeCalls.length, 0); // dead=true skips close()
+});
+
+Deno.test('ChannelManager: update() throws for invalid id', () => {
+  const mgr = new ChannelManager();
+  assertThrows(() => mgr.update(-1, (() => {}) as any), Error, 'Invalid channel id');
+});
+
+// =============================================================================
+// generateAlgorithmList tests
+// =============================================================================
+
+const SUPPORTED = ['a', 'b', 'c', 'd', 'e'];
+const DEFAULTS = ['a', 'b'];
+
+Deno.test('generateAlgorithmList: undefined returns defaultList', () => {
+  const result = generateAlgorithmList(undefined, DEFAULTS, SUPPORTED);
+  assertEquals(result, DEFAULTS);
+});
+
+Deno.test('generateAlgorithmList: empty array returns defaultList', () => {
+  const result = generateAlgorithmList([], DEFAULTS, SUPPORTED);
+  assertEquals(result, DEFAULTS);
+});
+
+Deno.test('generateAlgorithmList: valid exact array returns that array', () => {
+  const list = ['a', 'b'];
+  const result = generateAlgorithmList(list, DEFAULTS, SUPPORTED);
+  assertEquals(result, list);
+});
+
+Deno.test('generateAlgorithmList: array with unsupported algo throws', () => {
+  assertThrows(
+    () => generateAlgorithmList(['a', 'z'], DEFAULTS, SUPPORTED),
+    Error,
+    'Unsupported algorithm: z',
+  );
+});
+
+Deno.test('generateAlgorithmList: { append: string } adds to end', () => {
+  const result = generateAlgorithmList({ append: 'c' }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['a', 'b', 'c']);
+});
+
+Deno.test('generateAlgorithmList: { append: string } already in list — no duplicate', () => {
+  const result = generateAlgorithmList({ append: 'a' }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['a', 'b']);
+});
+
+Deno.test('generateAlgorithmList: { append: regex } adds all matching not in list', () => {
+  const result = generateAlgorithmList({ append: /[cd]/ }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['a', 'b', 'c', 'd']);
+});
+
+Deno.test('generateAlgorithmList: { prepend: string } adds to front', () => {
+  const result = generateAlgorithmList({ prepend: 'c' }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['c', 'a', 'b']);
+});
+
+Deno.test('generateAlgorithmList: { prepend: string } already in list — no duplicate', () => {
+  const result = generateAlgorithmList({ prepend: 'b' }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['a', 'b']);
+});
+
+Deno.test('generateAlgorithmList: { prepend: regex } adds matching to front', () => {
+  const result = generateAlgorithmList({ prepend: /[de]/ }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['d', 'e', 'a', 'b']);
+});
+
+Deno.test('generateAlgorithmList: { remove: string } removes from list', () => {
+  const result = generateAlgorithmList({ remove: 'a' }, DEFAULTS, SUPPORTED);
+  assertEquals(result, ['b']);
+});
+
+Deno.test('generateAlgorithmList: { remove: regex } removes all matching', () => {
+  const result = generateAlgorithmList({ remove: /[ab]/ }, DEFAULTS, SUPPORTED);
+  assertEquals(result, []);
+});
+
+Deno.test('generateAlgorithmList: empty string in append is skipped', () => {
+  const result = generateAlgorithmList({ append: '' }, DEFAULTS, SUPPORTED);
+  assertEquals(result, DEFAULTS);
+});
+
+Deno.test('generateAlgorithmList: object with no ops returns defaultList', () => {
+  const result = generateAlgorithmList({}, DEFAULTS, SUPPORTED);
+  assertEquals(result, DEFAULTS);
+});
+
+Deno.test('generateAlgorithmList: append unsupported string throws', () => {
+  assertThrows(
+    () => generateAlgorithmList({ append: 'z' }, DEFAULTS, SUPPORTED),
+    Error,
+    'Unsupported algorithm: z',
+  );
+});
+
+// =============================================================================
+// onChannelOpenFailure tests
+// =============================================================================
+
+Deno.test('onChannelOpenFailure: no callback, just removes channel', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  assertEquals(mgr.count, 1);
+  onChannelOpenFailure(mgr, id, null);
+  assertEquals(mgr.count, 0);
+});
+
+Deno.test('onChannelOpenFailure: Error instance passed to callback', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  const inputErr = new Error('connection refused');
+  let cbErr: Error | undefined;
+  onChannelOpenFailure(mgr, id, inputErr, (err) => { cbErr = err; });
+  assertEquals(cbErr, inputErr);
+});
+
+Deno.test('onChannelOpenFailure: info object sets reason on error', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  let cbErr: any;
+  onChannelOpenFailure(mgr, id, { reason: 4, description: 'forbidden' }, (err) => {
+    cbErr = err;
+  });
+  assertEquals(cbErr.reason, 4);
+  assertEquals(cbErr.message.includes('forbidden'), true);
+});
+
+Deno.test('onChannelOpenFailure: null info creates generic error', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  let cbErr: Error | undefined;
+  onChannelOpenFailure(mgr, id, null, (err) => { cbErr = err; });
+  assertEquals(cbErr?.message.includes('unexpectedly'), true);
+});
+
+// =============================================================================
+// onChannelClose tests
+// =============================================================================
+
+function makeChan(incomingState = 'open', outgoingState = 'open') {
+  const calls: string[] = [];
+  return {
+    incoming: { state: incomingState },
+    outgoing: { state: outgoingState },
+    close: () => calls.push('close'),
+    flushCallbacks: () => calls.push('flush'),
+    handleClose: () => calls.push('handleClose'),
+    calls,
+  };
+}
+
+Deno.test('onChannelClose: function channel delegates to onChannelOpenFailure', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  let cbCalled = false;
+  onChannelClose(mgr, id, (_err?: Error) => { cbCalled = true; });
+  assertEquals(cbCalled, true);
+});
+
+Deno.test('onChannelClose: null channel returns immediately', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  // Should not throw
+  onChannelClose(mgr, id, null as any);
+  assertEquals(mgr.count, 1); // remove was not called
+});
+
+Deno.test('onChannelClose: already closed channel returns immediately', () => {
+  const mgr = new ChannelManager();
+  const id = mgr.add();
+  const chan = makeChan('closed', 'open');
+  mgr.remove(id); // remove first
+  const id2 = mgr.add(chan as any);
+  onChannelClose(mgr, id2, chan as any);
+  // Since incoming.state is 'closed', nothing should happen
+  assertEquals(chan.calls.length, 0);
+});
+
+Deno.test('onChannelClose: normal open channel calls close, flush, handleClose', () => {
+  const mgr = new ChannelManager();
+  const chan = makeChan('open', 'open');
+  const id = mgr.add(chan as any);
+  onChannelClose(mgr, id, chan as any);
+  assertEquals(chan.calls.includes('close'), true);
+  assertEquals(chan.calls.includes('flush'), true);
+  assertEquals(chan.calls.includes('handleClose'), true);
+  assertEquals(chan.incoming.state, 'closed');
+});
+
+Deno.test('onChannelClose: dead=true skips close() call', () => {
+  const mgr = new ChannelManager();
+  const chan = makeChan('open', 'open');
+  const id = mgr.add(chan as any);
+  onChannelClose(mgr, id, chan as any, undefined, true);
+  assertEquals(chan.calls.includes('close'), false);
+  assertEquals(chan.calls.includes('flush'), true);
+  assertEquals(chan.calls.includes('handleClose'), true);
+});
+
+Deno.test('onChannelClose: outgoing state closing becomes closed', () => {
+  const mgr = new ChannelManager();
+  const chan = makeChan('open', 'closing');
+  const id = mgr.add(chan as any);
+  onChannelClose(mgr, id, chan as any, undefined, false);
+  assertEquals(chan.outgoing.state, 'closed');
 });

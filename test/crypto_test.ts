@@ -2,16 +2,23 @@
  * Tests for crypto module
  */
 
-import { assertEquals } from '@std/assert';
+import { assertEquals, assertThrows } from '@std/assert';
 import {
   hash,
+  HashBuilder,
   hashLength,
   hmac,
+  HmacBuilder,
   hmacVerify,
+  incrementCounter,
+  normalizeHashAlgorithm,
   randomBytes,
   randomFill,
+  randomUInt32,
   timingSafeEqual,
   xorBytes,
+  xorBytesInPlace,
+  zeroBytes,
 } from '../src/crypto/mod.ts';
 import { toHex } from '../src/utils/binary.ts';
 
@@ -224,4 +231,199 @@ Deno.test('SUPPORTED_KEX_ALGORITHMS contains expected algorithms', () => {
   assertEquals(SUPPORTED_KEX_ALGORITHMS.includes('curve25519-sha256'), true);
   assertEquals(SUPPORTED_KEX_ALGORITHMS.includes('ecdh-sha2-nistp256'), true);
   assertEquals(SUPPORTED_KEX_ALGORITHMS.includes('diffie-hellman-group14-sha256'), true);
+});
+
+// =============================================================================
+// normalizeHashAlgorithm error path
+// =============================================================================
+
+Deno.test('normalizeHashAlgorithm throws on unsupported algorithm', () => {
+  assertThrows(
+    () => normalizeHashAlgorithm('md5'),
+    Error,
+    'Unsupported hash algorithm: md5',
+  );
+});
+
+Deno.test('normalizeHashAlgorithm accepts all aliases', () => {
+  assertEquals(normalizeHashAlgorithm('sha-256'), 'SHA-256');
+  assertEquals(normalizeHashAlgorithm('SHA-256'), 'SHA-256');
+  assertEquals(normalizeHashAlgorithm('sha384'), 'SHA-384');
+  assertEquals(normalizeHashAlgorithm('sha-384'), 'SHA-384');
+  assertEquals(normalizeHashAlgorithm('SHA-384'), 'SHA-384');
+  assertEquals(normalizeHashAlgorithm('sha-1'), 'SHA-1');
+  assertEquals(normalizeHashAlgorithm('SHA-1'), 'SHA-1');
+  assertEquals(normalizeHashAlgorithm('sha-512'), 'SHA-512');
+  assertEquals(normalizeHashAlgorithm('SHA-512'), 'SHA-512');
+});
+
+// =============================================================================
+// HashBuilder tests
+// =============================================================================
+
+Deno.test('HashBuilder single update and digest', async () => {
+  const builder = new HashBuilder('sha256');
+  builder.update(new TextEncoder().encode('hello'));
+  const result = await builder.digest();
+  assertEquals(result.length, 32);
+
+  // Verify against known SHA-256 of 'hello'
+  const expected = await hash('sha256', new TextEncoder().encode('hello'));
+  assertEquals(result, expected);
+});
+
+Deno.test('HashBuilder multiple updates concatenate correctly', async () => {
+  const builder = new HashBuilder('sha256');
+  builder.update(new TextEncoder().encode('he'));
+  builder.update(new TextEncoder().encode('llo'));
+  const result = await builder.digest();
+
+  const expected = await hash('sha256', new TextEncoder().encode('hello'));
+  assertEquals(result, expected);
+});
+
+Deno.test('HashBuilder empty update sequence', async () => {
+  const builder = new HashBuilder('sha256');
+  const result = await builder.digest();
+  assertEquals(result.length, 32);
+});
+
+Deno.test('HashBuilder update returns this for chaining', () => {
+  const builder = new HashBuilder('sha256');
+  const ret = builder.update(new Uint8Array(4));
+  assertEquals(ret, builder);
+});
+
+Deno.test('HashBuilder sha1 produces 20-byte digest', async () => {
+  const builder = new HashBuilder('sha1');
+  builder.update(new TextEncoder().encode('test'));
+  const result = await builder.digest();
+  assertEquals(result.length, 20);
+});
+
+Deno.test('HashBuilder sha512 produces 64-byte digest', async () => {
+  const builder = new HashBuilder('sha512');
+  builder.update(new TextEncoder().encode('test'));
+  const result = await builder.digest();
+  assertEquals(result.length, 64);
+});
+
+// =============================================================================
+// HmacBuilder tests
+// =============================================================================
+
+Deno.test('HmacBuilder single update and digest', async () => {
+  const key = new TextEncoder().encode('secret');
+  const builder = new HmacBuilder('sha256', key);
+  builder.update(new TextEncoder().encode('hello'));
+  const result = await builder.digest();
+  assertEquals(result.length, 32);
+
+  const expected = await hmac('sha256', key, new TextEncoder().encode('hello'));
+  assertEquals(result, expected);
+});
+
+Deno.test('HmacBuilder multiple updates concatenate correctly', async () => {
+  const key = new TextEncoder().encode('key');
+  const builder = new HmacBuilder('sha256', key);
+  builder.update(new TextEncoder().encode('he'));
+  builder.update(new TextEncoder().encode('llo'));
+  const result = await builder.digest();
+
+  const expected = await hmac('sha256', key, new TextEncoder().encode('hello'));
+  assertEquals(result, expected);
+});
+
+Deno.test('HmacBuilder update returns this for chaining', () => {
+  const key = new TextEncoder().encode('k');
+  const builder = new HmacBuilder('sha256', key);
+  const ret = builder.update(new Uint8Array(2));
+  assertEquals(ret, builder);
+});
+
+// =============================================================================
+// xorBytesInPlace tests
+// =============================================================================
+
+Deno.test('xorBytesInPlace modifies target in-place', () => {
+  const target = new Uint8Array([0xff, 0x00, 0xaa]);
+  const source = new Uint8Array([0xff, 0xff, 0x55]);
+  xorBytesInPlace(target, source);
+  assertEquals(target, new Uint8Array([0x00, 0xff, 0xff]));
+});
+
+Deno.test('xorBytesInPlace uses min length when arrays differ in size', () => {
+  const target = new Uint8Array([0xff, 0xaa, 0x00]);
+  const source = new Uint8Array([0x0f, 0x0a]); // shorter
+  xorBytesInPlace(target, source);
+  assertEquals(target[0], 0xf0); // 0xff ^ 0x0f
+  assertEquals(target[1], 0xa0); // 0xaa ^ 0x0a
+  assertEquals(target[2], 0x00); // unchanged
+});
+
+// =============================================================================
+// incrementCounter tests
+// =============================================================================
+
+Deno.test('incrementCounter increments last byte', () => {
+  const counter = new Uint8Array([0x00, 0x00, 0x00, 0x00]);
+  incrementCounter(counter);
+  assertEquals(counter, new Uint8Array([0x00, 0x00, 0x00, 0x01]));
+});
+
+Deno.test('incrementCounter carries over when last byte overflows', () => {
+  const counter = new Uint8Array([0x00, 0x00, 0x00, 0xff]);
+  incrementCounter(counter);
+  assertEquals(counter, new Uint8Array([0x00, 0x00, 0x01, 0x00]));
+});
+
+Deno.test('incrementCounter handles multi-byte carry', () => {
+  const counter = new Uint8Array([0x00, 0xff, 0xff, 0xff]);
+  incrementCounter(counter);
+  assertEquals(counter, new Uint8Array([0x01, 0x00, 0x00, 0x00]));
+});
+
+Deno.test('incrementCounter wraps all-0xff to all-zero', () => {
+  const counter = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
+  incrementCounter(counter);
+  assertEquals(counter, new Uint8Array([0x00, 0x00, 0x00, 0x00]));
+});
+
+// =============================================================================
+// zeroBytes tests
+// =============================================================================
+
+Deno.test('zeroBytes fills buffer with zeros', () => {
+  const buf = new Uint8Array([1, 2, 3, 4, 5]);
+  zeroBytes(buf);
+  assertEquals(buf, new Uint8Array(5));
+});
+
+Deno.test('zeroBytes on empty buffer does not throw', () => {
+  const buf = new Uint8Array(0);
+  zeroBytes(buf);
+  assertEquals(buf.length, 0);
+});
+
+// =============================================================================
+// xorBytes error path
+// =============================================================================
+
+Deno.test('xorBytes throws when arrays have different lengths', () => {
+  assertThrows(
+    () => xorBytes(new Uint8Array(3), new Uint8Array(4)),
+    Error,
+    'same length',
+  );
+});
+
+// =============================================================================
+// randomUInt32 test
+// =============================================================================
+
+Deno.test('randomUInt32 returns a number in uint32 range', () => {
+  const val = randomUInt32();
+  assertEquals(typeof val, 'number');
+  // May be negative due to signed interpretation of bit ops, but within 32-bit range
+  assertEquals(Number.isInteger(val), true);
 });

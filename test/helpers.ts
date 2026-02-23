@@ -9,7 +9,7 @@ import { toBase64 } from '../src/utils/binary.ts';
 /**
  * Path to test fixtures directory
  */
-export const FIXTURES_PATH = new URL('./fixtures', import.meta.url).pathname;
+const FIXTURES_PATH = new URL('./fixtures', import.meta.url).pathname;
 
 /**
  * Path to keyParser fixtures directory
@@ -21,13 +21,6 @@ export const KEY_PARSER_FIXTURES_PATH = `${FIXTURES_PATH}/keyParser`;
  */
 export async function readFixture(path: string): Promise<Uint8Array> {
   return await Deno.readFile(path);
-}
-
-/**
- * Read a fixture file as text
- */
-export async function readFixtureText(path: string): Promise<string> {
-  return await Deno.readTextFile(path);
 }
 
 /**
@@ -48,11 +41,6 @@ export async function listDir(path: string): Promise<string[]> {
   }
   return entries;
 }
-
-/**
- * Check if Ed25519 is supported
- */
-export const EDDSA_SUPPORTED = true;
 
 /**
  * Expected key details from keyParser tests

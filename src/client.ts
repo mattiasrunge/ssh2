@@ -358,7 +358,12 @@ export class Client extends EventEmitter<ClientEvents> {
 
     // Parse private key if provided
     if (config.privateKey) {
-      const key = parseKey(config.privateKey, config.passphrase);
+      let key: ParsedKey | Error;
+      if (config.passphrase) {
+        key = await parseKey(config.privateKey, config.passphrase);
+      } else {
+        key = parseKey(config.privateKey);
+      }
       if (key instanceof Error) {
         throw new Error(`Cannot parse privateKey: ${key.message}`);
       }

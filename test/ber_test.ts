@@ -263,3 +263,91 @@ Deno.test('Ber constants have correct values', () => {
   assertEquals(Ber.OID, 0x06);
   assertEquals(Ber.Sequence, 0x30);
 });
+
+// =============================================================================
+// Additional BerReader tests for uncovered paths
+// =============================================================================
+
+Deno.test('BerReader: buffer/offset/length/remain getters', () => {
+  const data = fromHex('3003020105'); // SEQUENCE { INTEGER 5 }
+  const reader = new BerReader(data);
+  assertEquals(reader.buffer, data);
+  assertEquals(reader.offset, 0);
+  // length and remain before reading sequence
+  assertEquals(reader.remain, 5);
+  reader.readSequence();
+  assertEquals(reader.offset, 2);
+  assertEquals(reader.remain, 3);
+  // length is set by readSequence
+  assertEquals(reader.length, 3);
+});
+
+Deno.test('BerReader: readInt throws for wrong tag', () => {
+  // OCTET STRING instead of INTEGER
+  const data = fromHex('0401ff');
+  const reader = new BerReader(data);
+  assertThrows(() => reader.readInt(), Error, 'Expected INTEGER tag');
+});
+
+Deno.test('BerReader: readInt with len > 4 returns 0 and skips', () => {
+  // INTEGER with 5-byte value (len=5 → should skip and return 0)
+  const data = new Uint8Array([0x02, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05]);
+  const reader = new BerReader(data);
+  const val = reader.readInt();
+  assertEquals(val, 0);
+  // Should have advanced past the 5 bytes
+  assertEquals(reader.offset, 7);
+});
+
+Deno.test('BerReader: readInt handles negative number (sign bit set)', () => {
+  // INTEGER: tag=0x02, len=1, value=0xff (= -1 in signed)
+  const data = fromHex('0201ff');
+  const reader = new BerReader(data);
+  const val = reader.readInt();
+  assertEquals(val, -1);
+});
+
+Deno.test('BerReader: readOID throws for wrong tag', () => {
+  // INTEGER instead of OID
+  const data = fromHex('020105');
+  const reader = new BerReader(data);
+  assertThrows(() => reader.readOID(), Error, 'Expected OID tag');
+});
+
+Deno.test('BerReader: readString without returnBuffer returns UTF-8 string', () => {
+  // OCTET STRING containing "hi"
+  const hiBytes = new TextEncoder().encode('hi');
+  const data = new Uint8Array([0x04, 2, ...hiBytes]);
+  const reader = new BerReader(data);
+  const str = reader.readString(Ber.OctetString);
+  assertEquals(typeof str, 'string');
+  assertEquals(str, 'hi');
+});
+
+Deno.test('BerWriter: constructor with size option', () => {
+  const writer = new BerWriter({ size: 64 });
+  writer.writeNull();
+  assertEquals(toHex(writer.buffer), '0500');
+});
+
+Deno.test('BerWriter: _writeLength for len >= 0x10000 (3-byte length)', () => {
+  const writer = new BerWriter();
+  // Write a large buffer (65536 bytes) to trigger 3-byte length encoding
+  const largeData = new Uint8Array(0x10000); // 65536 bytes
+  writer.writeBuffer(largeData, Ber.OctetString);
+  const buf = writer.buffer;
+  // Tag (0x04), then 0x83 (3-byte len indicator), then 3 bytes of length
+  assertEquals(buf[0], 0x04); // OCTET STRING tag
+  assertEquals(buf[1], 0x83); // 3-byte length indicator
+  assertEquals(buf[2], 0x01); // 0x010000 >> 16
+  assertEquals(buf[3], 0x00); // (0x010000 >> 8) & 0xff
+  assertEquals(buf[4], 0x00); // 0x010000 & 0xff
+});
+
+Deno.test('BerWriter: writeInt with negative number needing leading 0xff', () => {
+  // -256: after inversion, bytes=[0x00]; 0x00 & 0x80 === 0, so prepend 0xff
+  const writer = new BerWriter();
+  writer.writeInt(-256);
+  // Expected: tag(02) + len(02) + ff + 00
+  assertEquals(toHex(writer.buffer), '0202ff00');
+});

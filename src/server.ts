@@ -1538,13 +1538,14 @@ export class Server extends EventEmitter<ServerEvents> {
   private _listener?: TransportListener;
   private _hostKeys: Map<string, ParsedKey>;
   private _hostKeyAlgoOrder: string[];
-  private _algorithms: {
+  private _algorithms!: {
     kex: string[];
     serverHostKey: string[];
     cs: { cipher: string[]; mac: string[]; compress: string[]; lang: string[] };
     sc: { cipher: string[]; mac: string[]; compress: string[]; lang: string[] };
   };
   private _config: ServerConfig;
+  private _hostKeysInitialized = false;
   private _connections = 0;
 
   maxConnections = Infinity;
@@ -1565,12 +1566,27 @@ export class Server extends EventEmitter<ServerEvents> {
     this._config = config;
     this._hostKeys = new Map();
     this._hostKeyAlgoOrder = [];
+    this._hostKeysInitialized = false;
 
     const hostKeys = config.hostKeys;
     if (!Array.isArray(hostKeys)) {
       throw new Error('hostKeys must be an array');
     }
 
+    if (listener) {
+      this.on('connection', listener);
+    }
+  }
+
+  /**
+   * Initialize host keys (async to support encrypted keys with passphrases)
+   */
+  private async _initHostKeys(): Promise<void> {
+    if (this._hostKeysInitialized) return;
+    this._hostKeysInitialized = true;
+
+    const config = this._config;
+    const hostKeys = config.hostKeys;
     const cfgAlgos = config.algorithms ?? {};
 
     const hostKeyAlgos = generateAlgorithmList(
@@ -1582,18 +1598,24 @@ export class Server extends EventEmitter<ServerEvents> {
     for (const hostKeyConfig of hostKeys) {
       let privateKey: ParsedKey;
 
-      // Check if it's already a ParsedKey object
       if (isParsedKey(hostKeyConfig)) {
         privateKey = hostKeyConfig;
-      } else {
-        const keyResult = hostKeyConfig instanceof Uint8Array || typeof hostKeyConfig === 'string'
-          ? parseKey(hostKeyConfig)
-          : parseKey(hostKeyConfig.key, hostKeyConfig.passphrase);
-
+      } else if (hostKeyConfig instanceof Uint8Array || typeof hostKeyConfig === 'string') {
+        const keyResult = parseKey(hostKeyConfig);
         if (keyResult instanceof Error) {
           throw new Error(`Cannot parse privateKey: ${keyResult.message}`);
         }
-
+        privateKey = Array.isArray(keyResult) ? keyResult[0] : keyResult;
+      } else {
+        let keyResult: ParsedKey | Error;
+        if (hostKeyConfig.passphrase) {
+          keyResult = await parseKey(hostKeyConfig.key, hostKeyConfig.passphrase);
+        } else {
+          keyResult = parseKey(hostKeyConfig.key);
+        }
+        if (keyResult instanceof Error) {
+          throw new Error(`Cannot parse privateKey: ${keyResult.message}`);
+        }
         privateKey = Array.isArray(keyResult) ? keyResult[0] : keyResult;
       }
 
@@ -1601,13 +1623,11 @@ export class Server extends EventEmitter<ServerEvents> {
         throw new Error('privateKey value contains an invalid private key');
       }
 
-      // Discard key if we already found a key of the same type
       if (this._hostKeyAlgoOrder.includes(privateKey.type)) {
         continue;
       }
 
       if (privateKey.type === 'ssh-rsa') {
-        // SSH supports multiple signature hashing algorithms for RSA
         let sha1Pos = hostKeyAlgos.indexOf('ssh-rsa');
         const sha256Pos = hostKeyAlgos.indexOf('rsa-sha2-256');
         const sha512Pos = hostKeyAlgos.indexOf('rsa-sha2-512');
@@ -1662,16 +1682,14 @@ export class Server extends EventEmitter<ServerEvents> {
       cs,
       sc: cs,
     };
-
-    if (listener) {
-      this.on('connection', listener);
-    }
   }
 
   /**
    * Start listening for connections
    */
   async listen(port: number, hostname?: string): Promise<void> {
+    await this._initHostKeys();
+
     const { DenoTransportFactory } = await import('./adapters/deno.ts');
     const factory = new DenoTransportFactory();
 

@@ -19,9 +19,20 @@ import {
   clearMustCallChecks,
   generateTestHostKeyEd25519,
   mustCall,
-  mustNotCall,
   verifyMustCallChecks,
 } from './integration_helpers.ts';
+import { fail } from '@std/assert';
+
+/**
+ * Create a function that should never be called
+ */
+function mustNotCall(msg?: string): (...args: unknown[]) => never {
+  const stack = new Error().stack ?? '';
+  return (...args: unknown[]) => {
+    const argsInfo = args.length > 0 ? `\nCalled with arguments: ${JSON.stringify(args)}` : '';
+    fail(`${msg || 'Function should not have been called'} at ${stack}${argsInfo}`);
+  };
+}
 
 const DEBUG = false;
 const FIXTURES_DIR = new URL('./fixtures/', import.meta.url).pathname;

@@ -81,6 +81,35 @@ export function onChannelClose(
     return;
   }
 
+  // Handle Session objects (server-side) which store channel info in _chanInfo
+  // and use emit() instead of handleClose()
+  const sessionLike = channel as unknown as Record<string, unknown>;
+  if (
+    '_chanInfo' in sessionLike &&
+    typeof sessionLike.emit === 'function'
+  ) {
+    const chanInfo = sessionLike._chanInfo as {
+      incoming: { state: string };
+      outgoing: { state: string };
+    };
+    if (chanInfo.incoming.state === 'closed') return;
+    chanMgr.remove(recipient);
+    chanInfo.incoming.state = 'closed';
+    chanInfo.outgoing.state = 'closed';
+    if (!sessionLike._ending) {
+      sessionLike._ending = true;
+      (sessionLike.emit as (event: string) => void)('eof');
+      (sessionLike.emit as (event: string) => void)('end');
+    }
+    (sessionLike.emit as (event: string) => void)('close');
+    // Also clean up underlying _channel if present
+    const subChannel = sessionLike._channel as ChannelOrCallback | undefined;
+    if (subChannel) {
+      onChannelClose(chanMgr, recipient, subChannel, err, dead);
+    }
+    return;
+  }
+
   if (channel.incoming && channel.incoming.state === 'closed') {
     return;
   }

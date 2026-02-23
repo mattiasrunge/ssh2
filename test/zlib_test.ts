@@ -287,3 +287,91 @@ Deno.test('ZlibPacketReader cleanup does not throw', () => {
   const reader = new ZlibPacketReader();
   reader.cleanup();
 });
+
+// =============================================================================
+// ZlibCompressor.compress() — sync method
+// =============================================================================
+
+Deno.test('ZlibCompressor compress returns Uint8Array', () => {
+  const compressor = new ZlibCompressor();
+  const data = fromString('Hello, World!');
+  const result = compressor.compress(data);
+  assertEquals(result instanceof Uint8Array, true);
+});
+
+Deno.test('ZlibCompressor compress returns Uint8Array for empty input', () => {
+  const compressor = new ZlibCompressor();
+  const result = compressor.compress(new Uint8Array(0));
+  assertEquals(result instanceof Uint8Array, true);
+});
+
+Deno.test('ZlibCompressor compress returns Uint8Array for binary data', () => {
+  const compressor = new ZlibCompressor();
+  const data = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) data[i] = i;
+  const result = compressor.compress(data);
+  assertEquals(result instanceof Uint8Array, true);
+});
+
+// =============================================================================
+// ZlibDecompressor.decompress() — sync method
+// Only safe to call with empty data; non-deflate bytes cause async rejection.
+// =============================================================================
+
+Deno.test('ZlibDecompressor decompress returns Uint8Array for empty input', () => {
+  const decompressor = new ZlibDecompressor();
+  const result = decompressor.decompress(new Uint8Array(0));
+  assertEquals(result instanceof Uint8Array, true);
+});
+
+// =============================================================================
+// ZlibPacketWriter.finalize() tests
+// =============================================================================
+
+function makeZlibProtocol(kexinit: unknown = undefined) {
+  return {
+    _kexinit: kexinit,
+    _cipher: {
+      allocPacket(size: number) { return allocBytes(size + 5); },
+    },
+  };
+}
+
+Deno.test('ZlibPacketWriter finalize compresses when kexinit is undefined', () => {
+  const protocol = makeZlibProtocol(undefined);
+  const writer = new ZlibPacketWriter(protocol);
+  const payload = fromString('test payload data');
+  const result = writer.finalize(payload);
+  // Result should be a Uint8Array (cipher packet wrapping compressed data)
+  assertEquals(result instanceof Uint8Array, true);
+  // Packet is bigger than 5 bytes (5-byte header + compressed data)
+  assertEquals(result.length >= 5, true);
+});
+
+Deno.test('ZlibPacketWriter finalize returns payload as-is during kex', () => {
+  const protocol = makeZlibProtocol({}); // non-undefined = kex in progress
+  const writer = new ZlibPacketWriter(protocol);
+  const payload = fromString('test payload');
+  const result = writer.finalize(payload);
+  // During kex, payload is returned unchanged (no compression)
+  assertEquals(result, payload);
+});
+
+Deno.test('ZlibPacketWriter finalize with force=true compresses during kex', () => {
+  const protocol = makeZlibProtocol({}); // kex in progress
+  const writer = new ZlibPacketWriter(protocol);
+  const payload = fromString('force compress');
+  const result = writer.finalize(payload, true);
+  // force=true bypasses kex check, should return cipher packet
+  assertEquals(result instanceof Uint8Array, true);
+  assertEquals(result.length >= 5, true);
+});
+
+Deno.test('ZlibPacketWriter finalize with force=false during kex returns payload', () => {
+  const protocol = makeZlibProtocol({}); // kex in progress
+  const writer = new ZlibPacketWriter(protocol);
+  const payload = new Uint8Array([10, 20, 30, 40]);
+  const result = writer.finalize(payload, false);
+  // force=false + kex in progress → return payload unchanged
+  assertEquals(result, payload);
+});

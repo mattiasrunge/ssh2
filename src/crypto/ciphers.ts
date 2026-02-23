@@ -10,6 +10,7 @@ import { incrementCounter, timingSafeEqual } from './utils.ts';
 import { allocBytes, concatBytes, readUInt32BE, writeUInt32BE } from '../utils/binary.ts';
 import type { CipherInfo, MACInfo } from '../protocol/constants.ts';
 import { ChaChaPolyCipher, ChaChaPolyDecipher } from './chacha20.ts';
+import { cbc } from '@noble/ciphers/aes';
 
 const MAX_PACKET_SIZE = 35000;
 
@@ -532,74 +533,80 @@ export class GenericCipher implements Cipher {
   async encrypt(packet: Uint8Array): Promise<void> {
     if (this._dead) return;
 
-    // Capture seqno and IV synchronously BEFORE any await
+    // Capture seqno synchronously BEFORE any await
     // to prevent race conditions when multiple packets are encrypted concurrently
     const seqnoBuf = allocBytes(4);
     writeUInt32BE(seqnoBuf, this.outSeqno, 0);
     this.outSeqno = (this.outSeqno + 1) >>> 0;
-
-    // For CTR mode, capture IV and increment synchronously
-    let iv: Uint8Array;
-    if (this._cipherMode === 'AES-CTR') {
-      iv = new Uint8Array(this._encIV);
-      // Increment counter by number of blocks
-      const dataLen = this._macETM ? packet.length - 4 : packet.length;
-      const blocks = Math.ceil(dataLen / this._blockLen);
-      for (let i = 0; i < blocks; i++) {
-        incrementCounter(this._encIV);
-      }
-    } else {
-      iv = this._encIV;
-    }
 
     // Reserve our position in the write queue BEFORE any async operations
     const { resolve, promise: myTurn } = Promise.withResolvers<void>();
     const previousWrite = this._writeQueue;
     this._writeQueue = myTurn;
 
-    const key = await this._getKey();
-
     let encrypted: Uint8Array;
     let mac: Uint8Array;
     let lenBytes: Uint8Array | undefined;
 
-    if (this._macETM) {
-      // Encrypt-then-MAC
-      lenBytes = packet.subarray(0, 4);
-      const toEncrypt = packet.subarray(4);
-
-      const ciphertext = await crypto.subtle.encrypt(
-        {
-          name: this._cipherMode,
-          counter: this._cipherMode === 'AES-CTR' ? iv as BufferSource : undefined,
-          length: this._cipherMode === 'AES-CTR' ? 128 : undefined,
-          iv: this._cipherMode === 'AES-CBC' ? iv as BufferSource : undefined,
-        },
-        key,
-        toEncrypt as BufferSource,
-      );
-      encrypted = new Uint8Array(ciphertext);
-
-      // MAC over seqno + length + encrypted
-      const macInput = concatBytes([seqnoBuf, lenBytes, encrypted]);
-      mac = await hmac(this._macAlgorithm, this._macKey, macInput);
+    if (this._cipherMode === 'AES-CBC') {
+      // Use @noble/ciphers for raw AES-CBC (no PKCS#7 padding).
+      // noble/ciphers is synchronous so IV update happens before any await,
+      // preserving correct ordering when encrypt() is called concurrently.
+      if (this._macETM) {
+        lenBytes = packet.subarray(0, 4);
+        const toEncrypt = packet.subarray(4);
+        encrypted = cbc(this._encKeyRaw, this._encIV, { disablePadding: true }).encrypt(toEncrypt);
+        // Update IV to last ciphertext block for next packet
+        this._encIV.set(encrypted.subarray(encrypted.length - this._blockLen));
+        mac = await hmac(
+          this._macAlgorithm,
+          this._macKey,
+          concatBytes([seqnoBuf, lenBytes, encrypted]),
+        );
+      } else {
+        // MAC-then-Encrypt: MAC is over plaintext, then encrypt
+        encrypted = cbc(this._encKeyRaw, this._encIV, { disablePadding: true }).encrypt(packet);
+        // Update IV to last ciphertext block for next packet
+        this._encIV.set(encrypted.subarray(encrypted.length - this._blockLen));
+        mac = await hmac(this._macAlgorithm, this._macKey, concatBytes([seqnoBuf, packet]));
+      }
     } else {
-      // MAC-then-Encrypt
-      // MAC over seqno + packet (unencrypted)
-      const macInput = concatBytes([seqnoBuf, packet]);
-      mac = await hmac(this._macAlgorithm, this._macKey, macInput);
+      // AES-CTR: use Web Crypto.
+      // Capture IV and increment synchronously BEFORE any await.
+      const iv = new Uint8Array(this._encIV);
+      const dataLen = this._macETM ? packet.length - 4 : packet.length;
+      const blocks = Math.ceil(dataLen / this._blockLen);
+      for (let i = 0; i < blocks; i++) {
+        incrementCounter(this._encIV);
+      }
 
-      const ciphertext = await crypto.subtle.encrypt(
-        {
-          name: this._cipherMode,
-          counter: this._cipherMode === 'AES-CTR' ? iv as BufferSource : undefined,
-          length: this._cipherMode === 'AES-CTR' ? 128 : undefined,
-          iv: this._cipherMode === 'AES-CBC' ? iv as BufferSource : undefined,
-        },
-        key,
-        packet as BufferSource,
-      );
-      encrypted = new Uint8Array(ciphertext);
+      const key = await this._getKey();
+
+      if (this._macETM) {
+        lenBytes = packet.subarray(0, 4);
+        const toEncrypt = packet.subarray(4);
+        const ciphertext = await crypto.subtle.encrypt(
+          { name: 'AES-CTR', counter: iv as BufferSource, length: 128 },
+          key,
+          toEncrypt as BufferSource,
+        );
+        encrypted = new Uint8Array(ciphertext);
+        mac = await hmac(
+          this._macAlgorithm,
+          this._macKey,
+          concatBytes([seqnoBuf, lenBytes, encrypted]),
+        );
+      } else {
+        // MAC-then-Encrypt
+        const macInput = concatBytes([seqnoBuf, packet]);
+        mac = await hmac(this._macAlgorithm, this._macKey, macInput);
+        const ciphertext = await crypto.subtle.encrypt(
+          { name: 'AES-CTR', counter: iv as BufferSource, length: 128 },
+          key,
+          packet as BufferSource,
+        );
+        encrypted = new Uint8Array(ciphertext);
+      }
     }
 
     // Truncate MAC if needed
@@ -700,8 +707,6 @@ export class GenericDecipher implements Decipher {
     p: number,
     dataLen: number,
   ): Promise<void | boolean | number> {
-    const key = await this._getKey();
-
     while (p < dataLen) {
       if (this._macETM) {
         // Encrypt-then-MAC: length is unencrypted
@@ -732,17 +737,19 @@ export class GenericDecipher implements Decipher {
           }
 
           // Decrypt first block to get length
-          const decrypted = await crypto.subtle.decrypt(
-            {
-              name: this._cipherMode,
-              counter: this._cipherMode === 'AES-CTR' ? this._decIV as BufferSource : undefined,
-              length: this._cipherMode === 'AES-CTR' ? 128 : undefined,
-              iv: this._cipherMode === 'AES-CBC' ? this._decIV as BufferSource : undefined,
-            },
-            key,
-            this._firstBlock as BufferSource,
-          );
-          const decryptedBlock = new Uint8Array(decrypted);
+          let decryptedBlock: Uint8Array;
+          if (this._cipherMode === 'AES-CBC') {
+            // noble/ciphers provides raw AES-CBC without PKCS#7 padding requirements
+            decryptedBlock = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(this._firstBlock!);
+          } else {
+            const key = await this._getKey();
+            const decrypted = await crypto.subtle.decrypt(
+              { name: 'AES-CTR', counter: this._decIV as BufferSource, length: 128 },
+              key,
+              this._firstBlock as BufferSource,
+            );
+            decryptedBlock = new Uint8Array(decrypted);
+          }
 
           this._len = readUInt32BE(decryptedBlock, 0);
           if (this._len > MAX_PACKET_SIZE || this._len < 8) {
@@ -755,7 +762,7 @@ export class GenericDecipher implements Decipher {
           this._pktLen = this._blockLen;
           this._firstBlockDecrypted = true;
 
-          // Update IV for CBC mode
+          // Update IV: for CBC, next IV = the ciphertext block we just decrypted
           if (this._cipherMode === 'AES-CBC') {
             this._decIV.set(this._firstBlock!);
           } else {
@@ -805,46 +812,53 @@ export class GenericDecipher implements Decipher {
         }
 
         // Decrypt
-        const decrypted = await crypto.subtle.decrypt(
-          {
-            name: this._cipherMode,
-            counter: this._cipherMode === 'AES-CTR' ? this._decIV as BufferSource : undefined,
-            length: this._cipherMode === 'AES-CTR' ? 128 : undefined,
-            iv: this._cipherMode === 'AES-CBC' ? this._decIV as BufferSource : undefined,
-          },
-          key,
-          this._packet as BufferSource,
-        );
-        const plaintext = new Uint8Array(decrypted);
-
-        const padLen = plaintext[0];
-        payload = plaintext.subarray(1, plaintext.length - padLen);
-
-        // Update IV
-        if (this._cipherMode === 'AES-CTR') {
+        let plaintext: Uint8Array;
+        if (this._cipherMode === 'AES-CBC') {
+          // Save last ciphertext block for IV update before decryption overwrites _packet
+          const lastCiphertextBlock = new Uint8Array(
+            this._packet!.subarray(this._packet!.length - this._blockLen),
+          );
+          plaintext = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(this._packet!);
+          this._decIV.set(lastCiphertextBlock);
+        } else {
+          const key = await this._getKey();
+          const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-CTR', counter: this._decIV as BufferSource, length: 128 },
+            key,
+            this._packet as BufferSource,
+          );
+          plaintext = new Uint8Array(decrypted);
           const blocks = Math.ceil(this._packet!.length / this._blockLen);
           for (let i = 0; i < blocks; i++) {
             incrementCounter(this._decIV);
           }
         }
+
+        const padLen = plaintext[0];
+        payload = plaintext.subarray(1, plaintext.length - padLen);
       } else {
         // Decrypt remaining blocks (first block already decrypted)
         if (this._pktLen > this._blockLen) {
+          // _packet[0..blockLen-1] = already-decrypted first block
+          // _packet[blockLen..] = raw ciphertext for remaining blocks
           const remaining = this._packet!.subarray(this._blockLen);
-          const decrypted = await crypto.subtle.decrypt(
-            {
-              name: this._cipherMode,
-              counter: this._cipherMode === 'AES-CTR' ? this._decIV as BufferSource : undefined,
-              length: this._cipherMode === 'AES-CTR' ? 128 : undefined,
-              iv: this._cipherMode === 'AES-CBC' ? this._decIV as BufferSource : undefined,
-            },
-            key,
-            remaining as BufferSource,
-          );
-          this._packet!.set(new Uint8Array(decrypted), this._blockLen);
-
-          // Update IV for remaining blocks
-          if (this._cipherMode === 'AES-CTR') {
+          if (this._cipherMode === 'AES-CBC') {
+            // Save last ciphertext block for IV update before we overwrite _packet
+            const lastCiphertextBlock = new Uint8Array(
+              remaining.subarray(remaining.length - this._blockLen),
+            );
+            const decrypted = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(remaining);
+            this._packet!.set(decrypted, this._blockLen);
+            // Update IV to last ciphertext block for next packet
+            this._decIV.set(lastCiphertextBlock);
+          } else {
+            const key = await this._getKey();
+            const decrypted = await crypto.subtle.decrypt(
+              { name: 'AES-CTR', counter: this._decIV as BufferSource, length: 128 },
+              key,
+              remaining as BufferSource,
+            );
+            this._packet!.set(new Uint8Array(decrypted), this._blockLen);
             const remainingBlocks = Math.ceil(remaining.length / this._blockLen);
             for (let i = 0; i < remainingBlocks; i++) {
               incrementCounter(this._decIV);

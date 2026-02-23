@@ -712,3 +712,394 @@ Deno.test('Cipher handles single byte payload', async () => {
   cipher.free();
   decipher.free();
 });
+
+// =============================================================================
+// AES-128-CBC with HMAC-SHA2-256 (MAC-then-Encrypt)
+// =============================================================================
+
+Deno.test('AES-128-CBC with HMAC-SHA2-256 round-trip', async () => {
+  const cipherInfo = CIPHER_INFO['aes128-cbc'];
+  const macInfo = MAC_INFO['hmac-sha2-256'];
+  const cipherKey = randomBytes(cipherInfo.keyLen);
+  const ivOrig = randomBytes(cipherInfo.ivLen!);
+  const ivEnc = new Uint8Array(ivOrig);
+  const ivDec = new Uint8Array(ivOrig);
+  const macKey = randomBytes(macInfo.len);
+
+  let ciphered: Uint8Array = new Uint8Array(0);
+  const deciphered: Uint8Array[] = [];
+
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      cipherInfo,
+      cipherKey,
+      cipherIV: ivEnc,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      decipherInfo: cipherInfo,
+      decipherKey: cipherKey,
+      decipherIV: ivDec,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const payload = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+
+  await cipher.encrypt(packet);
+  await decipher.decrypt(ciphered, 0, ciphered.length);
+
+  assertEquals(deciphered.length, 1);
+  assertEquals(deciphered[0], payload);
+
+  cipher.free();
+  decipher.free();
+});
+
+Deno.test('AES-256-CBC with HMAC-SHA2-256 round-trip', async () => {
+  const cipherInfo = CIPHER_INFO['aes256-cbc'];
+  const macInfo = MAC_INFO['hmac-sha2-256'];
+  const cipherKey = randomBytes(cipherInfo.keyLen);
+  const ivOrig = randomBytes(cipherInfo.ivLen!);
+  const ivEnc = new Uint8Array(ivOrig);
+  const ivDec = new Uint8Array(ivOrig);
+  const macKey = randomBytes(macInfo.len);
+
+  let ciphered: Uint8Array = new Uint8Array(0);
+  const deciphered: Uint8Array[] = [];
+
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      cipherInfo,
+      cipherKey,
+      cipherIV: ivEnc,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      decipherInfo: cipherInfo,
+      decipherKey: cipherKey,
+      decipherIV: ivDec,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const payload = new Uint8Array([0x11, 0x22, 0x33, 0x44, 0x55]);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+
+  await cipher.encrypt(packet);
+  await decipher.decrypt(ciphered, 0, ciphered.length);
+
+  assertEquals(deciphered.length, 1);
+  assertEquals(deciphered[0], payload);
+
+  cipher.free();
+  decipher.free();
+});
+
+Deno.test('AES-128-CBC multi-packet round-trip (IV chaining)', async () => {
+  const cipherInfo = CIPHER_INFO['aes128-cbc'];
+  const macInfo = MAC_INFO['hmac-sha2-256'];
+  const cipherKey = randomBytes(cipherInfo.keyLen);
+  const ivOrig = randomBytes(cipherInfo.ivLen!);
+  const ivEnc = new Uint8Array(ivOrig);
+  const ivDec = new Uint8Array(ivOrig);
+  const macKey = randomBytes(macInfo.len);
+
+  let ciphered: Uint8Array = new Uint8Array(0);
+  const deciphered: Uint8Array[] = [];
+
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      cipherInfo,
+      cipherKey,
+      cipherIV: ivEnc,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      decipherInfo: cipherInfo,
+      decipherKey: cipherKey,
+      decipherIV: ivDec,
+      macInfo,
+      macKey,
+    },
+  });
+
+  // Encrypt three packets to verify IV chaining across packets
+  const p1 = cipher.allocPacket(4);
+  p1.set([0xAA, 0xBB, 0xCC, 0xDD], 5);
+  await cipher.encrypt(p1);
+
+  const p2 = cipher.allocPacket(3);
+  p2.set([0x11, 0x22, 0x33], 5);
+  await cipher.encrypt(p2);
+
+  const p3 = cipher.allocPacket(2);
+  p3.set([0xFE, 0xED], 5);
+  await cipher.encrypt(p3);
+
+  await decipher.decrypt(ciphered, 0, ciphered.length);
+
+  assertEquals(deciphered.length, 3);
+  assertEquals(deciphered[0], new Uint8Array([0xAA, 0xBB, 0xCC, 0xDD]));
+  assertEquals(deciphered[1], new Uint8Array([0x11, 0x22, 0x33]));
+  assertEquals(deciphered[2], new Uint8Array([0xFE, 0xED]));
+
+  cipher.free();
+  decipher.free();
+});
+
+Deno.test('AES-128-CBC with HMAC-SHA2-256-ETM round-trip', async () => {
+  const cipherInfo = CIPHER_INFO['aes128-cbc'];
+  const macInfo = MAC_INFO['hmac-sha2-256-etm@openssh.com'];
+  const cipherKey = randomBytes(cipherInfo.keyLen);
+  const ivOrig = randomBytes(cipherInfo.ivLen!);
+  const ivEnc = new Uint8Array(ivOrig);
+  const ivDec = new Uint8Array(ivOrig);
+  const macKey = randomBytes(macInfo.len);
+
+  let ciphered: Uint8Array = new Uint8Array(0);
+  const deciphered: Uint8Array[] = [];
+
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      cipherInfo,
+      cipherKey,
+      cipherIV: ivEnc,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      decipherInfo: cipherInfo,
+      decipherKey: cipherKey,
+      decipherIV: ivDec,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const payload = new Uint8Array([0xCA, 0xFE, 0xBA, 0xBE]);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+
+  await cipher.encrypt(packet);
+  await decipher.decrypt(ciphered, 0, ciphered.length);
+
+  assertEquals(deciphered.length, 1);
+  assertEquals(deciphered[0], payload);
+
+  cipher.free();
+  decipher.free();
+});
+
+// =============================================================================
+// AES-128-CTR with ETM (Encrypt-Then-MAC) - covers the _macETM code path
+// =============================================================================
+
+Deno.test('AES-128-CTR with HMAC-SHA2-256-ETM round-trip', async () => {
+  const cipherInfo = CIPHER_INFO['aes128-ctr'];
+  const macInfo = MAC_INFO['hmac-sha2-256-etm@openssh.com'];
+  const cipherKey = randomBytes(cipherInfo.keyLen);
+  const ivOrig = randomBytes(cipherInfo.ivLen!);
+  const ivEnc = new Uint8Array(ivOrig);
+  const ivDec = new Uint8Array(ivOrig);
+  const macKey = randomBytes(macInfo.len);
+
+  let ciphered: Uint8Array = new Uint8Array(0);
+  const deciphered: Uint8Array[] = [];
+
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      cipherInfo,
+      cipherKey,
+      cipherIV: ivEnc,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      decipherInfo: cipherInfo,
+      decipherKey: cipherKey,
+      decipherIV: ivDec,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const payload = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+
+  await cipher.encrypt(packet);
+  await decipher.decrypt(ciphered, 0, ciphered.length);
+
+  assertEquals(deciphered.length, 1);
+  assertEquals(deciphered[0], payload);
+
+  cipher.free();
+  decipher.free();
+});
+
+// =============================================================================
+// NullCipher: dead check after free()
+// =============================================================================
+
+Deno.test('NullCipher: encrypt after free() is a no-op (dead check)', async () => {
+  let written = 0;
+  const cipher = new NullCipher(0, (_data) => { written++; });
+  const packet = cipher.allocPacket(4);
+  cipher.free(); // sets _dead = true
+  await cipher.encrypt(packet); // should return immediately without writing
+  assertEquals(written, 0);
+});
+
+// =============================================================================
+// NullDecipher: partial packet receive (feed data in small chunks)
+// =============================================================================
+
+Deno.test('NullDecipher: packet split across multiple decrypt() calls', async () => {
+  const payloads: Uint8Array[] = [];
+  let ciphered: Uint8Array = new Uint8Array(0);
+
+  const cipher = new NullCipher(0, (data) => { ciphered = concatBytes([ciphered, data]); });
+  const decipher = new NullDecipher(0, (p) => { payloads.push(new Uint8Array(p)); });
+
+  const payload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+  await cipher.encrypt(packet);
+
+  // Feed 1 byte at a time to exercise the incremental read path
+  for (let i = 0; i < ciphered.length; i++) {
+    await decipher.decrypt(ciphered, i, i + 1);
+  }
+
+  assertEquals(payloads.length, 1);
+  assertEquals(payloads[0], payload);
+
+  cipher.free();
+  decipher.free();
+});
+
+Deno.test('NullDecipher: two packets fed incrementally', async () => {
+  const payloads: Uint8Array[] = [];
+  let ciphered: Uint8Array = new Uint8Array(0);
+
+  const cipher = new NullCipher(0, (data) => { ciphered = concatBytes([ciphered, data]); });
+  const decipher = new NullDecipher(0, (p) => { payloads.push(new Uint8Array(p)); });
+
+  // Encrypt two separate packets
+  const p1 = cipher.allocPacket(4);
+  p1.set([0xAA, 0xBB, 0xCC, 0xDD], 5);
+  await cipher.encrypt(p1);
+  const p2 = cipher.allocPacket(2);
+  p2.set([0x11, 0x22], 5);
+  await cipher.encrypt(p2);
+
+  // Feed combined data in small chunks
+  const chunkSize = 3;
+  for (let i = 0; i < ciphered.length; i += chunkSize) {
+    await decipher.decrypt(ciphered, i, Math.min(i + chunkSize, ciphered.length));
+  }
+
+  assertEquals(payloads.length, 2);
+  assertEquals(payloads[0], new Uint8Array([0xAA, 0xBB, 0xCC, 0xDD]));
+  assertEquals(payloads[1], new Uint8Array([0x11, 0x22]));
+  cipher.free();
+  decipher.free();
+});
+
+// =============================================================================
+// AES-192-CTR with HMAC-SHA2-256
+// =============================================================================
+
+Deno.test('AES-192-CTR with HMAC-SHA2-256 round-trip', async () => {
+  const cipherInfo = CIPHER_INFO['aes192-ctr'];
+  const macInfo = MAC_INFO['hmac-sha2-256'];
+  const cipherKey = randomBytes(cipherInfo.keyLen);
+  const ivOrig = randomBytes(cipherInfo.ivLen!);
+  const ivEnc = new Uint8Array(ivOrig);
+  const ivDec = new Uint8Array(ivOrig);
+  const macKey = randomBytes(macInfo.len);
+
+  let ciphered: Uint8Array = new Uint8Array(0);
+  const deciphered: Uint8Array[] = [];
+
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => { ciphered = concatBytes([ciphered, data]); },
+      cipherInfo,
+      cipherKey,
+      cipherIV: ivEnc,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => { deciphered.push(new Uint8Array(payload)); },
+      decipherInfo: cipherInfo,
+      decipherKey: cipherKey,
+      decipherIV: ivDec,
+      macInfo,
+      macKey,
+    },
+  });
+
+  const payload = new Uint8Array([0x01, 0x02, 0x03]);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+
+  await cipher.encrypt(packet);
+  await decipher.decrypt(ciphered, 0, ciphered.length);
+
+  assertEquals(deciphered.length, 1);
+  assertEquals(deciphered[0], payload);
+
+  cipher.free();
+  decipher.free();
+});

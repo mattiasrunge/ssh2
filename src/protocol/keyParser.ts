@@ -21,6 +21,7 @@ import {
 } from '../utils/binary.ts';
 import { CIPHER_INFO } from './constants.ts';
 import { makeBufferParser, readString } from './utils.ts';
+import { cbc, ctr, gcm } from '@noble/ciphers/aes';
 
 /** Symbol key for the hash algorithm property on a parsed key (exported for testing). */
 export const SYM_HASH_ALGO = Symbol('Hash Algorithm');
@@ -870,10 +871,10 @@ const SUPPORTED_CIPHER = [
 /**
  * Parse OpenSSH private key format (new format: BEGIN OPENSSH PRIVATE KEY)
  */
-function parseOpenSSHPrivate(
+async function parseOpenSSHPrivate(
   str: string,
   passphrase?: Uint8Array,
-): ParsedKey | Error | null {
+): Promise<ParsedKey | Error | null> {
   const regexp =
     /^-----BEGIN OPENSSH PRIVATE KEY-----(?:\r\n|\n)([\s\S]+)(?:\r\n|\n)-----END OPENSSH PRIVATE KEY-----$/;
   const m = regexp.exec(str);
@@ -947,7 +948,10 @@ function parseOpenSSHPrivate(
       }
       const rounds = readUInt32BE(kdfOptions, kdfData._pos || 0);
 
-      const gen = allocBytes(encInfo.keyLen + (encInfo.ivLen || 0));
+      // For CBC ciphers, ivLen in CIPHER_INFO is 0 (transport-layer convention)
+      // but OpenSSH key format uses blockLen as the IV length
+      const ivLen = encInfo.ivLen || encInfo.blockLen;
+      const gen = allocBytes(encInfo.keyLen + ivLen);
       const r = bcrypt_pbkdf(
         passphrase,
         passphrase.length,
@@ -1021,18 +1025,34 @@ function parseOpenSSHPrivate(
 }
 
 /**
- * Decrypt private key blob (placeholder - encrypted keys not yet supported)
+ * Decrypt private key blob using @noble/ciphers (no PKCS#7 padding)
  */
 function decryptPrivateKey(
-  _privBlob: Uint8Array,
-  _cipherKey: Uint8Array,
-  _cipherIV: Uint8Array,
-  _encInfo: typeof CIPHER_INFO[keyof typeof CIPHER_INFO],
-  _data: Uint8Array,
-  _pos: number,
+  privBlob: Uint8Array,
+  cipherKey: Uint8Array,
+  cipherIV: Uint8Array,
+  encInfo: typeof CIPHER_INFO[keyof typeof CIPHER_INFO],
+  data: Uint8Array,
+  pos: number,
 ): Uint8Array {
-  // TODO: Implement encrypted key decryption using @noble/ciphers
-  throw new Error('Encrypted OpenSSH private keys not yet supported');
+  const sslName = encInfo.sslName;
+
+  if (sslName.includes('gcm')) {
+    // For GCM, the auth tag follows the encrypted blob in the file
+    const authLen = encInfo.authLen || 16;
+    const authTag = data.subarray(pos, pos + authLen);
+    // @noble/ciphers gcm expects ciphertext + tag concatenated
+    const ciphertextWithTag = allocBytes(privBlob.length + authLen);
+    ciphertextWithTag.set(privBlob, 0);
+    ciphertextWithTag.set(authTag, privBlob.length);
+    return gcm(cipherKey, cipherIV).decrypt(ciphertextWithTag);
+  } else if (sslName.includes('ctr')) {
+    return ctr(cipherKey, cipherIV).decrypt(privBlob);
+  } else if (sslName.includes('cbc')) {
+    return cbc(cipherKey, cipherIV, { disablePadding: true }).decrypt(privBlob);
+  } else {
+    throw new Error(`Unsupported cipher for OpenSSH key: ${sslName}`);
+  }
 }
 
 /**
@@ -1276,12 +1296,287 @@ function parseOldPEMPrivate(
 }
 
 /**
+ * Parse RFC4716 public key format (---- BEGIN SSH2 PUBLIC KEY ----)
+ */
+function parseRFC4716Public(str: string): ParsedKey | Error | null {
+  const startMarker = '---- BEGIN SSH2 PUBLIC KEY ----';
+  const endMarker = '---- END SSH2 PUBLIC KEY ----';
+
+  const startIdx = str.indexOf(startMarker);
+  if (startIdx === -1) return null;
+
+  const endIdx = str.indexOf(endMarker, startIdx);
+  if (endIdx === -1) return new Error('Malformed RFC4716 public key: missing end marker');
+
+  const body = str.substring(startIdx + startMarker.length, endIdx).trim();
+  const lines = body.split(/\r?\n/);
+
+  let comment = '';
+  const dataLines: string[] = [];
+  let inHeader = true;
+  let continuedHeader = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (inHeader) {
+      if (continuedHeader || /^[A-Za-z][A-Za-z0-9-]*:/.test(line)) {
+        let headerLine = continuedHeader + line;
+
+        if (headerLine.endsWith('\\')) {
+          continuedHeader = headerLine.slice(0, -1);
+          continue;
+        }
+        continuedHeader = '';
+
+        const colonIdx = headerLine.indexOf(':');
+        if (colonIdx !== -1) {
+          const key = headerLine.substring(0, colonIdx).toLowerCase();
+          let value = headerLine.substring(colonIdx + 1).trim();
+
+          if (key === 'comment') {
+            if (value.startsWith('"') && value.endsWith('"')) {
+              value = value.slice(1, -1);
+            }
+            comment = value;
+          }
+        }
+      } else {
+        inHeader = false;
+        dataLines.push(line);
+      }
+    } else {
+      dataLines.push(line);
+    }
+  }
+
+  const b64 = dataLines.join('');
+  if (b64.length === 0) {
+    return new Error('Malformed RFC4716 public key: no key data');
+  }
+
+  const keyData = fromBase64(b64) as Uint8Array & { _pos?: number };
+  keyData._pos = 0;
+
+  const type = readStringAndUpdatePos(keyData, true) as string | undefined;
+  if (type === undefined) {
+    return new Error('Malformed RFC4716 public key');
+  }
+
+  const baseType = type.replace(/-cert-v0[01]@openssh\.com$/, '');
+  return parseDER(keyData, baseType, comment, type);
+}
+
+/**
+ * Parse PuTTY PPK v2 private key format
+ */
+async function parsePPKPrivate(
+  str: string,
+  passphrase?: Uint8Array,
+): Promise<ParsedKey | Error | null> {
+  const headerMatch = str.match(/^PuTTY-User-Key-File-2:\s*(.+)$/m);
+  if (!headerMatch) return null;
+
+  const keyType = headerMatch[1].trim();
+
+  const encryptionMatch = str.match(/^Encryption:\s*(.+)$/m);
+  if (!encryptionMatch) return new Error('Malformed PPK key: missing Encryption');
+  const encryption = encryptionMatch[1].trim();
+
+  const commentMatch = str.match(/^Comment:\s*(.+)$/m);
+  const comment = commentMatch ? commentMatch[1].trim() : '';
+
+  const pubLinesMatch = str.match(/^Public-Lines:\s*(\d+)$/m);
+  if (!pubLinesMatch) return new Error('Malformed PPK key: missing Public-Lines');
+  const pubLineCount = parseInt(pubLinesMatch[1], 10);
+
+  const privLinesMatch = str.match(/^Private-Lines:\s*(\d+)$/m);
+  if (!privLinesMatch) return new Error('Malformed PPK key: missing Private-Lines');
+  const privLineCount = parseInt(privLinesMatch[1], 10);
+
+  const macMatch = str.match(/^Private-MAC:\s*([0-9a-f]+)$/m);
+  if (!macMatch) return new Error('Malformed PPK key: missing Private-MAC');
+  const macHex = macMatch[1];
+
+  const lines = str.split(/\r?\n/);
+  let pubStartIdx = -1;
+  let privStartIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('Public-Lines:')) {
+      pubStartIdx = i + 1;
+    } else if (lines[i].startsWith('Private-Lines:')) {
+      privStartIdx = i + 1;
+    }
+  }
+
+  if (pubStartIdx === -1 || privStartIdx === -1) {
+    return new Error('Malformed PPK key');
+  }
+
+  const pubB64 = lines.slice(pubStartIdx, pubStartIdx + pubLineCount).join('');
+  const privB64 = lines.slice(privStartIdx, privStartIdx + privLineCount).join('');
+
+  const pubBlob = fromBase64(pubB64);
+  let privBlob = fromBase64(privB64);
+
+  if (encryption !== 'none') {
+    if (encryption !== 'aes256-cbc') {
+      return new Error(`Unsupported PPK encryption: ${encryption}`);
+    }
+    if (!passphrase) {
+      return new Error('Encrypted PPK key detected, but no passphrase given');
+    }
+
+    // Derive key: SHA-1(0x00000000 || passphrase) || SHA-1(0x00000001 || passphrase)
+    const seq0 = allocBytes(4 + passphrase.length);
+    writeUInt32BE(seq0, 0, 0);
+    seq0.set(passphrase, 4);
+    const seq1 = allocBytes(4 + passphrase.length);
+    writeUInt32BE(seq1, 1, 0);
+    seq1.set(passphrase, 4);
+
+    const hash0 = new Uint8Array(await crypto.subtle.digest('SHA-1', seq0 as BufferSource));
+    const hash1 = new Uint8Array(await crypto.subtle.digest('SHA-1', seq1 as BufferSource));
+
+    const decKey = allocBytes(32);
+    decKey.set(hash0, 0);
+    decKey.set(hash1.subarray(0, 12), 20);
+
+    const iv = new Uint8Array(16);
+    try {
+      privBlob = cbc(decKey, iv, { disablePadding: true }).decrypt(privBlob);
+    } catch {
+      return new Error('PPK decryption failed -- bad passphrase?');
+    }
+  }
+
+  // Verify MAC: SHA-1 HMAC over (keyType || encryption || comment || pubBlob || privBlob)
+  const macPrefix = new TextEncoder().encode('putty-private-key-file-mac-key');
+  const macKeyInput = allocBytes(macPrefix.length + (passphrase ? passphrase.length : 0));
+  macKeyInput.set(macPrefix, 0);
+  if (passphrase) {
+    macKeyInput.set(passphrase, macPrefix.length);
+  }
+  const macKeyHash = new Uint8Array(
+    await crypto.subtle.digest('SHA-1', macKeyInput as BufferSource),
+  );
+
+  const encoder = new TextEncoder();
+  const keyTypeBytes = encoder.encode(keyType);
+  const encryptionBytes = encoder.encode(encryption);
+  const commentBytes = encoder.encode(comment);
+
+  const macDataLen =
+    4 + keyTypeBytes.length +
+    4 + encryptionBytes.length +
+    4 + commentBytes.length +
+    4 + pubBlob.length +
+    4 + privBlob.length;
+  const macData = allocBytes(macDataLen);
+  let offset = 0;
+
+  writeUInt32BE(macData, keyTypeBytes.length, offset); offset += 4;
+  macData.set(keyTypeBytes, offset); offset += keyTypeBytes.length;
+  writeUInt32BE(macData, encryptionBytes.length, offset); offset += 4;
+  macData.set(encryptionBytes, offset); offset += encryptionBytes.length;
+  writeUInt32BE(macData, commentBytes.length, offset); offset += 4;
+  macData.set(commentBytes, offset); offset += commentBytes.length;
+  writeUInt32BE(macData, pubBlob.length, offset); offset += 4;
+  macData.set(pubBlob, offset); offset += pubBlob.length;
+  writeUInt32BE(macData, privBlob.length, offset); offset += 4;
+  macData.set(privBlob, offset);
+
+  const hmacKey = await crypto.subtle.importKey(
+    'raw', macKeyHash as BufferSource,
+    { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'],
+  );
+  const computedMac = new Uint8Array(
+    await crypto.subtle.sign('HMAC', hmacKey, macData as BufferSource),
+  );
+  const expectedMac = hexToBytes(macHex);
+
+  if (computedMac.length !== expectedMac.length ||
+      !computedMac.every((b, i) => b === expectedMac[i])) {
+    if (encryption !== 'none') {
+      return new Error('PPK MAC verification failed -- bad passphrase?');
+    }
+    return new Error('PPK MAC verification failed');
+  }
+
+  // Parse public key from pubBlob
+  const pubData = pubBlob as Uint8Array & { _pos?: number };
+  pubData._pos = 0;
+  const pubType = readStringAndUpdatePos(pubData, true) as string | undefined;
+  if (pubType === undefined || pubType !== keyType) {
+    return new Error('Malformed PPK key: public key type mismatch');
+  }
+
+  const baseType = keyType.replace(/-cert-v0[01]@openssh\.com$/, '');
+  if (!isSupportedKeyType(baseType)) {
+    return new Error(`Unsupported PPK key type: ${keyType}`);
+  }
+
+  const privParsed = privBlob as Uint8Array & { _pos?: number };
+  privParsed._pos = 0;
+
+  let privPEM: string | null = null;
+  let pubPEM: string | null = null;
+  let pubSSH: Uint8Array | null = null;
+  let algo: string | null = null;
+
+  switch (baseType) {
+    case 'ssh-rsa': {
+      const e = readStringAndUpdatePos(pubData) as Uint8Array | undefined;
+      if (e === undefined) return new Error('Malformed PPK key');
+      const n = readStringAndUpdatePos(pubData) as Uint8Array | undefined;
+      if (n === undefined) return new Error('Malformed PPK key');
+      const d = readStringAndUpdatePos(privParsed) as Uint8Array | undefined;
+      if (d === undefined) return new Error('Malformed PPK key');
+      const p = readStringAndUpdatePos(privParsed) as Uint8Array | undefined;
+      if (p === undefined) return new Error('Malformed PPK key');
+      const q = readStringAndUpdatePos(privParsed) as Uint8Array | undefined;
+      if (q === undefined) return new Error('Malformed PPK key');
+      const iqmp = readStringAndUpdatePos(privParsed) as Uint8Array | undefined;
+      if (iqmp === undefined) return new Error('Malformed PPK key');
+
+      pubPEM = genOpenSSLRSAPub(n, e);
+      pubSSH = genOpenSSHRSAPub(n, e);
+      privPEM = genOpenSSLRSAPriv(n, e, d, iqmp, p, q);
+      algo = 'sha1';
+      break;
+    }
+    default:
+      return new Error(`Unsupported PPK key type: ${keyType}`);
+  }
+
+  return createBaseKey(keyType, comment, privPEM, pubPEM, pubSSH, algo, encryption !== 'none');
+}
+
+/**
+ * Convert hex string to Uint8Array
+ */
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = allocBytes(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+
+/**
  * Main key parsing function
  */
+export function parseKey(data: string | Uint8Array | ParsedKey): ParsedKey | Error;
+export function parseKey(
+  data: string | Uint8Array | ParsedKey,
+  passphrase: string | Uint8Array,
+): Promise<ParsedKey | Error>;
 export function parseKey(
   data: string | Uint8Array | ParsedKey,
   passphrase?: string | Uint8Array,
-): ParsedKey | Error {
+): ParsedKey | Error | Promise<ParsedKey | Error> {
   if (isParsedKey(data)) {
     return data;
   }
@@ -1298,14 +1593,12 @@ export function parseKey(
     return new Error('Key data must be a Buffer or string');
   }
 
-  // Validate passphrase if provided (will be used for encrypted private keys)
+  // Validate passphrase if provided
   if (passphrase !== undefined) {
     if (typeof passphrase !== 'string' && !(passphrase instanceof Uint8Array)) {
       return new Error('Passphrase must be a string or Uint8Array when supplied');
     }
   }
-
-  let ret: ParsedKey | Error | null;
 
   // Convert passphrase to Uint8Array if string
   let passphraseBytes: Uint8Array | undefined;
@@ -1317,24 +1610,174 @@ export function parseKey(
     }
   }
 
-  // Try public key formats first (simpler, no passphrase needed)
-  ret = parseOpenSSHPublic(strData);
-  if (ret !== null) return ret;
+  // Try public key formats first (sync, no passphrase needed)
+  const pubResult = parseOpenSSHPublic(strData);
+  if (pubResult !== null) return pubResult;
 
-  // Try OpenSSH new format private key
-  ret = parseOpenSSHPrivate(strData, passphraseBytes);
-  if (ret !== null) return ret;
+  const rfc4716Result = parseRFC4716Public(strData);
+  if (rfc4716Result !== null) return rfc4716Result;
 
-  // Try old PEM format private keys (PKCS#1, SEC1 EC)
-  ret = parseOldPEMPrivate(strData, passphraseBytes);
-  if (ret !== null) return ret;
+  // For formats that may need async operations, delegate to async path
+  if (passphraseBytes !== undefined) {
+    return parseKeyAsync(strData, origBuffer, passphraseBytes);
+  }
 
-  // TODO: Add more private key parsers:
-  // - OpenSSH_Old_Private.parse(strData, passphraseBytes) - old PEM format
-  // - PPK_Private.parse(strData, passphraseBytes) - PuTTY format
-  // - RFC4716_Public.parse(strData) - RFC4716 public key
+  // Sync path for non-encrypted private keys
+  return parseKeySync(strData, origBuffer);
+}
+
+/**
+ * Sync key parsing for non-encrypted keys
+ */
+function parseKeySync(
+  strData: string,
+  origBuffer: Uint8Array | undefined,
+): ParsedKey | Error {
+  // Try OpenSSH new format (non-encrypted)
+  if (/^-----BEGIN OPENSSH PRIVATE KEY-----/.test(strData)) {
+    return parseOpenSSHPrivateSync(strData);
+  }
+
+  // Encrypted old PEM uses MD5-based key derivation and is not supported
+  if (/Proc-Type: 4,ENCRYPTED/.test(strData)) {
+    return new Error(
+      'Encrypted old-style PEM keys are not supported. '
+      + 'Convert to the new OpenSSH format with: ssh-keygen -p -o -f <keyfile>',
+    );
+  }
+
+  // Try old PEM format private keys (PKCS#1, SEC1 EC) - unencrypted only
+  const ret = parseOldPEMPrivate(strData);
+  if (ret !== null) return ret;
+  if (/^PuTTY-User-Key-File-2:/.test(strData)) {
+    const encMatch = strData.match(/^Encryption:\s*(.+)$/m);
+    if (encMatch && encMatch[1].trim() !== 'none') {
+      return new Error('Encrypted PPK key detected, but no passphrase given');
+    }
+  }
 
   // Try binary format if we have original buffer
+  if (origBuffer) {
+    binaryKeyParser.init(origBuffer, 0);
+    const type = binaryKeyParser.readString(true) as string | undefined;
+    if (type !== undefined) {
+      const keyData = binaryKeyParser.readRaw();
+      if (keyData !== undefined) {
+        const binRet = parseDER(keyData as Uint8Array & { _pos?: number }, type, '', type);
+        if (!(binRet instanceof Error)) {
+          binaryKeyParser.clear();
+          return binRet;
+        }
+      }
+    }
+    binaryKeyParser.clear();
+  }
+
+  return new Error('Unsupported key format');
+}
+
+/**
+ * Synchronous parsing of non-encrypted OpenSSH private keys
+ */
+function parseOpenSSHPrivateSync(str: string): ParsedKey | Error {
+  const regexp =
+    /^-----BEGIN OPENSSH PRIVATE KEY-----(?:\r\n|\n)([\s\S]+)(?:\r\n|\n)-----END OPENSSH PRIVATE KEY-----$/;
+  const m = regexp.exec(str);
+  if (m === null) return new Error('Malformed OpenSSH private key');
+
+  const data = fromBase64(m[1].replace(/\s/g, '')) as Uint8Array & { _pos?: number };
+  if (data.length < 31) {
+    return new Error('Malformed OpenSSH private key');
+  }
+
+  const magic = toUtf8(data.subarray(0, 15));
+  if (magic !== 'openssh-key-v1\0') {
+    return new Error(`Unsupported OpenSSH key magic: ${magic}`);
+  }
+  data._pos = 15;
+
+  const cipherName = readStringAndUpdatePos(data, true) as string | undefined;
+  if (cipherName === undefined) return new Error('Malformed OpenSSH private key');
+  if (cipherName !== 'none') {
+    return new Error('Encrypted private OpenSSH key detected, but no passphrase given');
+  }
+
+  const kdfName = readStringAndUpdatePos(data, true) as string | undefined;
+  if (kdfName === undefined) return new Error('Malformed OpenSSH private key');
+  if (kdfName !== 'none') return new Error('Malformed OpenSSH private key');
+
+  const kdfOptions = readStringAndUpdatePos(data) as Uint8Array | undefined;
+  if (kdfOptions === undefined) return new Error('Malformed OpenSSH private key');
+  if (kdfOptions.length > 0) return new Error('Malformed OpenSSH private key');
+
+  if ((data._pos || 0) + 3 >= data.length) {
+    return new Error('Malformed OpenSSH private key');
+  }
+  const keyCount = readUInt32BE(data, data._pos || 0);
+  data._pos = (data._pos || 0) + 4;
+
+  if (keyCount === 0) return new Error('No keys in OpenSSH private key file');
+
+  for (let i = 0; i < keyCount; ++i) {
+    const pubData = readStringAndUpdatePos(data) as Uint8Array | undefined;
+    if (pubData === undefined) return new Error('Malformed OpenSSH private key');
+  }
+
+  const privBlob = readStringAndUpdatePos(data) as Uint8Array | undefined;
+  if (privBlob === undefined) return new Error('Malformed OpenSSH private key');
+
+  if ((data._pos || 0) !== data.length) {
+    return new Error('Malformed OpenSSH private key');
+  }
+
+  const result = parseOpenSSHPrivKeys(
+    privBlob as Uint8Array & { _pos?: number },
+    keyCount,
+    false,
+  );
+  if (result instanceof Error) return result;
+  return result[0];
+}
+
+/**
+ * Async key parsing for encrypted keys or formats requiring async operations
+ */
+async function parseKeyAsync(
+  strData: string,
+  origBuffer: Uint8Array | undefined,
+  passphraseBytes: Uint8Array,
+): Promise<ParsedKey | Error> {
+  let ret: ParsedKey | Error | null;
+
+  // Try OpenSSH new format private key
+  ret = await parseOpenSSHPrivate(strData, passphraseBytes);
+  if (ret !== null) return ret;
+
+  // Encrypted old PEM (Proc-Type: 4,ENCRYPTED) uses MD5-based key derivation
+  // which is insecure and not supported. Convert with: ssh-keygen -p -o -f <keyfile>
+  if (/Proc-Type: 4,ENCRYPTED/.test(strData)) {
+    return new Error(
+      'Encrypted old-style PEM keys are not supported. '
+      + 'Convert to the new OpenSSH format with: ssh-keygen -p -o -f <keyfile>',
+    );
+  }
+
+  // Try old PEM format private keys (unencrypted only)
+  ret = parseOldPEMPrivate(strData);
+  if (ret !== null) return ret;
+
+  // Try PPK format
+  ret = await parsePPKPrivate(strData, passphraseBytes);
+  if (ret !== null) return ret;
+
+  // Try public key formats
+  const pubResult = parseOpenSSHPublic(strData);
+  if (pubResult !== null) return pubResult;
+
+  const rfc4716Result = parseRFC4716Public(strData);
+  if (rfc4716Result !== null) return rfc4716Result;
+
+  // Try binary format
   if (origBuffer) {
     binaryKeyParser.init(origBuffer, 0);
     const type = binaryKeyParser.readString(true) as string | undefined;

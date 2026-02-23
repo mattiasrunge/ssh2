@@ -185,6 +185,11 @@ Deno.test({
         }),
       );
 
+      // Wait for client close to ensure TCP connection is fully torn down
+      const clientClosed = new Promise<void>((resolve) => {
+        ctx.client.on('close', () => resolve());
+      });
+
       // Client executes with agentForward
       const execDone = (async () => {
         const stream = await ctx.client.exec('foo --bar', { agentForward: true });
@@ -206,6 +211,7 @@ Deno.test({
       })();
 
       await execDone;
+      await clientClosed;
     } finally {
       await ctx.cleanup();
     }

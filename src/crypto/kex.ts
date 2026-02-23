@@ -6,8 +6,13 @@
  */
 
 import { x25519 } from '@noble/curves/ed25519';
+import { p256 } from '@noble/curves/p256';
+import { p384 } from '@noble/curves/p384';
+import { p521 } from '@noble/curves/p521';
 import { randomBytes } from './random.ts';
 import { allocBytes } from '../utils/binary.ts';
+
+type NobleCurve = typeof p256;
 
 /**
  * Key exchange result with public key and shared secret computation
@@ -102,31 +107,34 @@ export class X25519Exchange implements KeyExchange {
 }
 
 /**
- * ECDH key exchange using Web Crypto API
+ * ECDH key exchange using @noble/curves
  * Supports P-256, P-384, P-521 curves
  */
 export class ECDHExchange implements KeyExchange {
   readonly name: string;
   readonly hashName: string;
-  private readonly webCryptoCurve: string;
+  private readonly curve: NobleCurve;
+  private readonly scalarSize: number;
 
   constructor(name: string, curveName: string, hashName: string) {
     this.name = name;
     this.hashName = hashName;
 
-    // Map SSH curve names to Web Crypto names
     switch (curveName) {
       case 'nistp256':
       case 'prime256v1':
-        this.webCryptoCurve = 'P-256';
+        this.curve = p256;
+        this.scalarSize = 32;
         break;
       case 'nistp384':
       case 'secp384r1':
-        this.webCryptoCurve = 'P-384';
+        this.curve = p384;
+        this.scalarSize = 48;
         break;
       case 'nistp521':
       case 'secp521r1':
-        this.webCryptoCurve = 'P-521';
+        this.curve = p521;
+        this.scalarSize = 66;
         break;
       default:
         throw new Error(`Unsupported ECDH curve: ${curveName}`);
@@ -134,66 +142,23 @@ export class ECDHExchange implements KeyExchange {
   }
 
   async generateKeyPair(): Promise<KeyExchangeResult> {
-    // Generate ECDH key pair using Web Crypto
-    const keyPair = await crypto.subtle.generateKey(
-      {
-        name: 'ECDH',
-        namedCurve: this.webCryptoCurve,
-      },
-      true, // extractable
-      ['deriveBits'],
-    );
-
-    // Export public key in raw format (uncompressed point)
-    const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
-    const publicKey = new Uint8Array(publicKeyRaw);
+    const privateKey = this.curve.utils.randomPrivateKey();
+    // Uncompressed point: 0x04 + x + y
+    const publicKey = this.curve.getPublicKey(privateKey, false);
 
     return {
       publicKey,
       computeSecret: async (peerPublicKey: Uint8Array): Promise<Uint8Array> => {
         try {
-          // Import peer's public key
-          const peerKey = await crypto.subtle.importKey(
-            'raw',
-            peerPublicKey as BufferSource,
-            {
-              name: 'ECDH',
-              namedCurve: this.webCryptoCurve,
-            },
-            false,
-            [],
-          );
-
-          // Derive shared secret
-          const sharedSecretBits = await crypto.subtle.deriveBits(
-            {
-              name: 'ECDH',
-              public: peerKey,
-            },
-            keyPair.privateKey,
-            this.getKeyBitLength(),
-          );
-
-          // Return raw bytes; mpint encoding happens in buildExchangeHashInput
-          return new Uint8Array(sharedSecretBits);
+          // getSharedSecret returns uncompressed point (0x04 + x + y);
+          // extract only the x-coordinate to match SSH ECDH shared secret format
+          const sharedPoint = this.curve.getSharedSecret(privateKey, peerPublicKey, false);
+          return sharedPoint.slice(1, 1 + this.scalarSize);
         } catch (e) {
           throw new Error(`ECDH key exchange failed: ${(e as Error).message}`);
         }
       },
     };
-  }
-
-  private getKeyBitLength(): number {
-    switch (this.webCryptoCurve) {
-      case 'P-256':
-        return 256;
-      case 'P-384':
-        return 384;
-      case 'P-521':
-        return 528; // 521 bits, rounded up to byte boundary
-      default:
-        throw new Error(`Unknown curve: ${this.webCryptoCurve}`);
-    }
   }
 }
 
