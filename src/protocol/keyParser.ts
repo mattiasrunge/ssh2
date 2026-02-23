@@ -1321,7 +1321,7 @@ function parseRFC4716Public(str: string): ParsedKey | Error | null {
 
     if (inHeader) {
       if (continuedHeader || /^[A-Za-z][A-Za-z0-9-]*:/.test(line)) {
-        let headerLine = continuedHeader + line;
+        const headerLine = continuedHeader + line;
 
         if (headerLine.endsWith('\\')) {
           continuedHeader = headerLine.slice(0, -1);

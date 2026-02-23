@@ -181,7 +181,6 @@ Deno.test('DenoListener: close() stops accept loop cleanly', async () => {
   const denoListener = new DenoListener(rawListener);
 
   const acceptTask = (async () => {
-    // deno-lint-ignore no-empty
     for await (const _transport of denoListener) {
       // close immediately
     }
