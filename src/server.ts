@@ -1271,11 +1271,11 @@ export class Connection extends EventEmitter<ConnectionEvents> {
           this.emit('greeting', header.greeting);
         }
       },
-      onHandshakeComplete: () => {
+      onHandshakeComplete: (algorithms) => {
         if (++exchanges > 1) {
           this.emit('rekey');
         }
-        this.emit('handshake', {});
+        this.emit('handshake', algorithms ? { serverHostKey: algorithms.serverHostKey } : {});
       },
       debug,
       messageHandlers: handlers,

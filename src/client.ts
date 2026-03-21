@@ -415,16 +415,26 @@ export class Client extends EventEmitter<ClientEvents> {
 
     // Wait for authentication to complete
     await new Promise<void>((resolve, reject) => {
-      const onReady = () => {
+      const cleanup = () => {
+        this.removeListener('ready', onReady);
         this.removeListener('error', onError);
+        this.removeListener('close', onClose);
+      };
+      const onReady = () => {
+        cleanup();
         resolve();
       };
       const onError = (err: Error) => {
-        this.removeListener('ready', onReady);
+        cleanup();
         reject(err);
+      };
+      const onClose = () => {
+        cleanup();
+        reject(new Error('Connection closed before authentication completed'));
       };
       this.once('ready', onReady);
       this.once('error', onError);
+      this.once('close', onClose);
     });
   }
 
@@ -510,9 +520,9 @@ export class Client extends EventEmitter<ClientEvents> {
           this.emit('greeting', header.greeting);
         }
       },
-      onHandshakeComplete: () => {
+      onHandshakeComplete: (algorithms) => {
         this._exchanges++;
-        this.emit('handshake', {});
+        this.emit('handshake', algorithms ? { serverHostKey: algorithms.serverHostKey } : {});
         if (this._exchanges === 1) {
           // Request user auth service only on first handshake
           this._protocol!.service('ssh-userauth');

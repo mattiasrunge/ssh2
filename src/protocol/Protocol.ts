@@ -19,7 +19,13 @@ import { allocBytes, concatBytes, fromString, toUtf8, writeUInt32BE } from '../u
 import { EventEmitter } from '../utils/events.ts';
 import { CIPHER_INFO, COMPAT_CHECKS, DISCONNECT_REASON, MAC_INFO, MESSAGE } from './constants.ts';
 import { type HandlerProtocol, MESSAGE_HANDLERS, type ProtocolHandlers } from './handlers.ts';
-import { createDefaultOffer, type KexAlgorithms, KexHandler, type SessionKeys } from './kex.ts';
+import {
+  createDefaultOffer,
+  type KexAlgorithms,
+  KexHandler,
+  type NegotiatedAlgorithms,
+  type SessionKeys,
+} from './kex.ts';
 import type { ParsedKey } from './keyParser.ts';
 import type { FatalErrorProtocol } from './utils.ts';
 import { PacketReader, PacketWriter, ZlibCompressor, ZlibDecompressor } from './zlib.ts';
@@ -72,7 +78,7 @@ export interface ProtocolConfig {
   debug?: (msg: string) => void;
   onHeader?: (header: ProtocolHeader) => void;
   onPacket?: () => void;
-  onHandshakeComplete?: () => void;
+  onHandshakeComplete?: (algorithms?: NegotiatedAlgorithms) => void;
   messageHandlers?: ProtocolHandlers;
   offer?: KexAlgorithms;
   ident?: string | Uint8Array;
@@ -125,7 +131,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   _onError?: (err: Error) => void;
   private _onHeader?: (header: ProtocolHeader) => void;
   private _onPacket?: () => void;
-  private _onHandshakeComplete?: () => void;
+  private _onHandshakeComplete?: (algorithms?: NegotiatedAlgorithms) => void;
   private _hostVerifier?: (key: Uint8Array) => boolean | Promise<boolean>;
 
   // State
@@ -623,7 +629,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     }
 
     // Notify handshake complete
-    this._onHandshakeComplete?.();
+    this._onHandshakeComplete?.(this._kexHandler.state.algorithms);
   }
 
   /**

@@ -402,25 +402,28 @@ Deno.test('auth: rejection without methods list', async () => {
   try {
     const addr = ctx.server.address()!;
 
-    // Server rejects with no methods → client has no fallback and emits error
-    const done = new Promise<void>((resolve) => {
-      ctx.server.on(
-        'connection',
-        mustCall((conn: Connection) => {
-          conn.on(
-            'authentication',
-            mustCall((authCtx: ServerAuthContext) => {
-              authCtx.reject(); // No methods list - covers USERAUTH_FAILURE with empty methods
-            }),
-          );
-        }),
-      );
-      // Client emits error when no methods remain after USERAUTH_FAILURE with empty list
-      ctx.client.once('error', () => resolve());
-    });
+    // Server rejects with no methods → client has no fallback and connect rejects
+    ctx.server.on(
+      'connection',
+      mustCall((conn: Connection) => {
+        conn.on(
+          'authentication',
+          mustCall((authCtx: ServerAuthContext) => {
+            authCtx.reject(); // No methods list - covers USERAUTH_FAILURE with empty methods
+          }),
+        );
+      }),
+    );
 
-    await ctx.client.connect({ host: addr.hostname, port: addr.port, username: 'test' });
-    await done;
+    let connectError: Error | undefined;
+    try {
+      await ctx.client.connect({ host: addr.hostname, port: addr.port, username: 'test' });
+    } catch (err) {
+      connectError = err as Error;
+    }
+
+    assertEquals(connectError !== undefined, true);
+    assertEquals(connectError!.message, 'All configured authentication methods failed');
   } finally {
     await ctx.cleanup();
   }
@@ -1033,21 +1036,20 @@ Deno.test('server: maxConnections limits simultaneous connections', async () => 
     await conn1Done;
 
     // Second client should be rejected (transport closed immediately by maxConnections).
-    // connect() itself resolves once the TCP transport is set up, so we must wait for
-    // the async 'error' or 'close' event that signals the server dropped the connection.
-    const client2Dropped = new Promise<void>((resolve) => {
-      client2.once('error', () => resolve());
-      client2.once('close', () => resolve());
-    });
+    // connect() will throw because the server drops the connection before auth completes.
+    let client2Error: Error | undefined;
+    try {
+      await client2.connect({
+        host: addr.hostname,
+        port: addr.port,
+        username: 't',
+        password: 'p',
+      });
+    } catch (err) {
+      client2Error = err as Error;
+    }
 
-    await client2.connect({
-      host: addr.hostname,
-      port: addr.port,
-      username: 't',
-      password: 'p',
-    });
-
-    await client2Dropped;
+    assertEquals(client2Error !== undefined, true);
   } finally {
     try {
       client1.end();
@@ -1336,14 +1338,15 @@ Deno.test('auth: no authentication listener auto-rejects connections', async () 
   client.on('error', () => {});
 
   try {
-    // Client error or close when all auth attempts are rejected
-    const done = new Promise<void>((resolve) => {
-      client.once('error', () => resolve());
-      client.once('close', () => resolve());
-    });
+    // Client connect rejects when all auth attempts are rejected
+    let connectError: Error | undefined;
+    try {
+      await client.connect({ host: addr.hostname, port: addr.port, username: 'test', password: 'p' });
+    } catch (err) {
+      connectError = err as Error;
+    }
 
-    await client.connect({ host: addr.hostname, port: addr.port, username: 'test', password: 'p' });
-    await done;
+    assertEquals(connectError !== undefined, true);
   } finally {
     try {
       client.end();
