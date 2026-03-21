@@ -1341,7 +1341,12 @@ Deno.test('auth: no authentication listener auto-rejects connections', async () 
     // Client connect rejects when all auth attempts are rejected
     let connectError: Error | undefined;
     try {
-      await client.connect({ host: addr.hostname, port: addr.port, username: 'test', password: 'p' });
+      await client.connect({
+        host: addr.hostname,
+        port: addr.port,
+        username: 'test',
+        password: 'p',
+      });
     } catch (err) {
       connectError = err as Error;
     }
