@@ -800,6 +800,9 @@ export class Client extends EventEmitter<ClientEvents> {
       // Check if more data arrived while we were processing
       if (this._writeQueue.length > 0) {
         this._processWriteQueue();
+      } else if (this._closing && this._transport) {
+        this._transport.close();
+        this._transport = undefined;
       }
     }
   }
@@ -1516,10 +1519,16 @@ export class Client extends EventEmitter<ClientEvents> {
     }
 
     if (this._transport) {
-      this._transport.close();
-      this._transport = undefined;
+      this._closing = true;
+      // If no write is in progress, close immediately; otherwise _processWriteQueue will close
+      if (!this._writeInProgress) {
+        this._transport.close();
+        this._transport = undefined;
+      }
     }
   }
+
+  private _closing = false;
 
   /**
    * Clean up pending callbacks and channels

@@ -659,39 +659,29 @@ Deno.test({
       debug: DEBUG_COMPRESS ? (msg: string) => console.log('[COMPRESS][CLIENT]', msg) : undefined,
     });
 
-    await new Promise<void>((resolve, reject) => {
-      client.on(
-        'ready',
-        mustCall(async () => {
-          try {
-            const stream = await client.exec('test command');
+    // client.connect() already waits for 'ready', so proceed directly
+    const stream = await client.exec('test command');
 
-            // Use ReadableStream API to read data
-            const reader = stream.stdout.getReader();
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const decoded = new TextDecoder().decode(value);
-                console.log('[TEST] Received data:', decoded.substring(0, 50) + '...');
-                receivedData += decoded;
-              }
-            } finally {
-              reader.releaseLock();
-            }
-            console.log('[TEST] Stream finished, receivedData length:', receivedData.length);
-            client.end();
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        }),
-      );
-    });
+    // Use ReadableStream API to read data
+    const reader = stream.stdout.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const decoded = new TextDecoder().decode(value);
+        console.log('[TEST] Received data:', decoded.substring(0, 50) + '...');
+        receivedData += decoded;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    console.log('[TEST] Stream finished, receivedData length:', receivedData.length);
 
-    await new Promise<void>((resolve) => {
-      client.on('close', mustCall(() => resolve()));
+    const closeDone = new Promise<void>((resolve) => {
+      client.on('close', () => resolve());
     });
+    client.end();
+    await closeDone;
 
     assertEquals(receivedData.includes('Compressed response to: test command'), true);
     assertEquals(receivedData.includes('A'.repeat(100)), true);

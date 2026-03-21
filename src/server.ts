@@ -1331,6 +1331,8 @@ export class Connection extends EventEmitter<ConnectionEvents> {
       // Check if more data arrived while we were processing
       if (this._writeQueue.length > 0) {
         this._processWriteQueue();
+      } else if (this._closing) {
+        this._transport.close();
       }
     }
   }
@@ -1374,9 +1376,15 @@ export class Connection extends EventEmitter<ConnectionEvents> {
    */
   end(): this {
     this._protocol.disconnect(DISCONNECT_REASON.BY_APPLICATION);
-    this._transport.close();
+    this._closing = true;
+    // If no write is in progress, close immediately; otherwise _processWriteQueue will close
+    if (!this._writeInProgress) {
+      this._transport.close();
+    }
     return this;
   }
+
+  private _closing = false;
 
   /**
    * Open X11 channel

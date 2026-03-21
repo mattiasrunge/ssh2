@@ -663,3 +663,73 @@ Deno.test({
     }
   },
 });
+
+Deno.test('exec: exec() immediately after connect() without separate ready listener', async () => {
+  clearMustCallChecks();
+  const title = 'exec after connect';
+  const hostKey = await generateTestHostKeyEd25519();
+
+  const server = new Server({
+    hostKeys: [hostKey.parsedKey],
+    debug: DEBUG ? (msg: string) => console.log(`[${title}][SERVER]`, msg) : undefined,
+  });
+
+  const client = new Client();
+
+  if (!DEBUG) {
+    server.on('error', () => {});
+    client.on('error', () => {});
+  }
+
+  await server.listen(0, '127.0.0.1');
+  const addr = server.address()!;
+
+  try {
+    const COMMAND = 'test-cmd';
+    const STDOUT_DATA = 'hello from exec\n';
+
+    // Server side: accept auth + handle session
+    server.on('connection', (conn: Connection) => {
+      conn.on('authentication', (authCtx: ServerAuthContext) => {
+        authCtx.accept();
+      });
+      conn.on('ready', () => {
+        conn.on('session', (accept: () => Session | undefined) => {
+          const session = accept();
+          if (!session) return;
+
+          session.on('exec', (
+            acceptExec: () => Channel | undefined,
+            _reject: (() => void) | undefined,
+            info: { command: string },
+          ) => {
+            assertEquals(info.command, COMMAND);
+            const stream = acceptExec();
+            if (!stream) return;
+            stream.write(STDOUT_DATA);
+            stream.exit(0);
+            stream.end();
+          });
+        });
+      });
+    });
+
+    // Client side: connect() then immediately exec() — no separate 'ready' listener
+    await client.connect({
+      host: addr.hostname,
+      port: addr.port,
+      username: 'test',
+      password: 'test',
+      debug: DEBUG ? (msg: string) => console.log(`[${title}][CLIENT]`, msg) : undefined,
+    });
+
+    // If connect() doesn't wait for auth, this would fail with channel open failure
+    const stream = await client.exec(COMMAND);
+    const stdout = await collectStream(stream.stdout);
+    assertEquals(stdout, STDOUT_DATA);
+  } finally {
+    try { client.end(); } catch { /* ignore */ }
+    try { await server.close(); } catch { /* ignore */ }
+    verifyMustCallChecks();
+  }
+});
