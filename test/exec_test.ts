@@ -728,8 +728,12 @@ Deno.test('exec: exec() immediately after connect() without separate ready liste
     const stdout = await collectStream(stream.stdout);
     assertEquals(stdout, STDOUT_DATA);
   } finally {
-    try { client.end(); } catch { /* ignore */ }
-    try { await server.close(); } catch { /* ignore */ }
+    try {
+      client.end();
+    } catch { /* ignore */ }
+    try {
+      await server.close();
+    } catch { /* ignore */ }
     verifyMustCallChecks();
   }
 });
