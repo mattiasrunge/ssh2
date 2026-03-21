@@ -412,6 +412,20 @@ export class Client extends EventEmitter<ClientEvents> {
 
     // Start protocol (send identification string)
     this._protocol!.start?.();
+
+    // Wait for authentication to complete
+    await new Promise<void>((resolve, reject) => {
+      const onReady = () => {
+        this.removeListener('error', onError);
+        resolve();
+      };
+      const onError = (err: Error) => {
+        this.removeListener('ready', onReady);
+        reject(err);
+      };
+      this.once('ready', onReady);
+      this.once('error', onError);
+    });
   }
 
   /**

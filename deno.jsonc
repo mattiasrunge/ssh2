@@ -1,6 +1,6 @@
 {
   "name": "@ein/ssh2-ts",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "exports": "./mod.ts",
   "description": "ssh2-ts - Fork of ssh2, ssh, sftp",
   "repository": "https://github.com/mattiasrunge/ssh2",
@@ -39,7 +39,7 @@
     "fmt": "deno fmt"
   },
   "test": {
-    "exclude": ["test/test.js", "lib/", "node_modules/"]
+    "exclude": ["node_modules/"]
   },
   "fmt": {
     "useTabs": false,
