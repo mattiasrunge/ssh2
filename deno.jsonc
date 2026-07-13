@@ -1,6 +1,6 @@
 {
   "name": "@ein/ssh2-ts",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "exports": "./mod.ts",
   "description": "ssh2-ts - Fork of ssh2, ssh, sftp",
   "repository": "https://github.com/mattiasrunge/ssh2",
@@ -24,7 +24,6 @@
   },
   "imports": {
     "@noble/ciphers": "npm:@noble/ciphers@1",
-    "bcrypt-pbkdf": "npm:bcrypt-pbkdf@1",
     "@std/assert": "jsr:@std/assert@1.0.18"
   },
   "tasks": {

@@ -9,8 +9,8 @@
  * - RFC4716 public keys
  */
 
-import { pbkdf as bcrypt_pbkdf } from 'bcrypt-pbkdf';
 import { decryptNoPad, importCbcKey } from '../crypto/aes-cbc.ts';
+import { bcryptPbkdf } from '../crypto/bcrypt-pbkdf.ts';
 import { Ber, BerReader, BerWriter } from '../utils/ber.ts';
 import {
   allocBytes,
@@ -1021,21 +1021,20 @@ async function parseOpenSSHPrivate(
       // For CBC ciphers, ivLen in CIPHER_INFO is 0 (transport-layer convention)
       // but OpenSSH key format uses blockLen as the IV length
       const ivLen = encInfo.ivLen || encInfo.blockLen;
-      const gen = allocBytes(encInfo.keyLen + ivLen);
-      const r = bcrypt_pbkdf(
-        passphrase,
-        passphrase.length,
-        salt,
-        salt.length,
-        gen,
-        gen.length,
-        rounds,
-      );
-      if (r !== 0) {
+      const keyLen = encInfo.keyLen + ivLen;
+
+      try {
+        const gen = await bcryptPbkdf(
+          passphrase,
+          salt,
+          keyLen,
+          rounds,
+        );
+        cipherKey = gen.subarray(0, encInfo.keyLen);
+        cipherIV = gen.subarray(encInfo.keyLen);
+      } catch {
         return new Error('Failed to generate information to decrypt key');
       }
-      cipherKey = gen.subarray(0, encInfo.keyLen);
-      cipherIV = gen.subarray(encInfo.keyLen);
     }
   } else if (kdfName !== 'none') {
     return new Error('Malformed OpenSSH private key');

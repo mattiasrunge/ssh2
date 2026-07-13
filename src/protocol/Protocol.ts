@@ -38,7 +38,7 @@ import type { FatalErrorProtocol } from './utils.ts';
 import { PacketReader, PacketWriter, ZlibCompressor, ZlibDecompressor } from './zlib.ts';
 
 const MODULE_VER = '2.0.0';
-const IDENT_RAW = fromString(`SSH-2.0-ssh2js${MODULE_VER}`);
+const IDENT_RAW = fromString(`SSH-2.0-ssh2ts${MODULE_VER}`);
 const PING_PAYLOAD = new Uint8Array([
   MESSAGE.GLOBAL_REQUEST,
   // "keepalive@openssh.com"

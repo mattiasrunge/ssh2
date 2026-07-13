@@ -807,18 +807,12 @@ Almost all cryptography runs on Deno's built-in
   implemented on top of it in `src/crypto/aes-cbc.ts`
 - Random number generation
 
-Two npm dependencies remain, each used for a single feature that Deno (as of 2.9) has no native
-equivalent for:
+One npm dependency remain, used for a single feature that Deno (as of 2.9) has no native equivalent
+for:
 
 - **`npm:@noble/ciphers@1`** — used only for the `chacha20-poly1305@openssh.com` transport cipher
   (`src/crypto/chacha20.ts`). The OpenSSH construction needs raw ChaCha20 and standalone Poly1305
   primitives that Deno does not provide.
-- **`npm:bcrypt-pbkdf@1`** — used only for the `bcrypt` KDF when reading or writing
-  passphrase-protected OpenSSH private keys (`src/keygen.ts`, `src/protocol/keyParser.ts`). This is
-  OpenSSH's custom bcrypt-based key derivation, which Deno does not provide.
-
-The long-term goal is to remove these last two dependencies as well, either when Deno gains the
-missing primitives or by vendoring the implementations.
 
 ## License
 

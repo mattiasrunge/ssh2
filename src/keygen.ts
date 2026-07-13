@@ -4,7 +4,7 @@
  * Generate SSH key pairs in OpenSSH format using Web Crypto API.
  */
 
-import { pbkdf as bcryptPbkdf } from 'bcrypt-pbkdf';
+import { bcryptPbkdf } from './crypto/bcrypt-pbkdf.ts';
 import { randomBytes } from './crypto/mod.ts';
 import { CIPHER_INFO } from './protocol/constants.ts';
 import { Ber, BerReader } from './utils/ber.ts';
@@ -474,36 +474,34 @@ async function convertKeys(
 
     if (format === 'new') {
       const rounds = opts.rounds && opts.rounds > 0 ? opts.rounds : DEFAULT_ROUNDS;
-      const gen = allocBytes(cipher.keyLen + cipher.ivLen);
+      const keyLen = cipher.keyLen + cipher.ivLen;
       const salt = randomBytes(SALT_LEN);
 
-      const r = bcryptPbkdf(
-        passphrase,
-        passphrase.length,
-        salt,
-        salt.length,
-        gen,
-        gen.length,
-        rounds,
-      );
-      if (r !== 0) {
+      try {
+        const gen = await bcryptPbkdf(
+          passphrase,
+          salt,
+          keyLen,
+          rounds,
+        );
+
+        // KDF options: string salt, uint32 rounds
+        const kdfOptions = allocBytes(4 + salt.length + 4);
+        writeUInt32BE(kdfOptions, salt.length, 0);
+        kdfOptions.set(salt, 4);
+        writeUInt32BE(kdfOptions, rounds, 4 + salt.length);
+
+        encrypted = {
+          cipher,
+          cipherName: opts.cipher,
+          kdfName: 'bcrypt',
+          kdfOptions,
+          key: gen.subarray(0, cipher.keyLen),
+          iv: gen.subarray(cipher.keyLen),
+        };
+      } catch {
         throw new Error('Failed to generate information to encrypt key');
       }
-
-      // KDF options: string salt, uint32 rounds
-      const kdfOptions = allocBytes(4 + salt.length + 4);
-      writeUInt32BE(kdfOptions, salt.length, 0);
-      kdfOptions.set(salt, 4);
-      writeUInt32BE(kdfOptions, rounds, 4 + salt.length);
-
-      encrypted = {
-        cipher,
-        cipherName: opts.cipher,
-        kdfName: 'bcrypt',
-        kdfOptions,
-        key: gen.subarray(0, cipher.keyLen),
-        iv: gen.subarray(cipher.keyLen),
-      };
     }
   }
 
