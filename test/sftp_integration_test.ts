@@ -14,6 +14,7 @@ import {
   type SFTPHandle,
   STATUS_CODE,
 } from '../src/protocol/sftp/mod.ts';
+import { WriteStream } from '../src/protocol/sftp/streams.ts';
 
 const DEBUG = false;
 
@@ -1552,4 +1553,151 @@ Deno.test('SFTP: partial length byte then rest of packet', async () => {
   const rest = new Uint8Array([0, 5, 2, 0, 0, 0, 3]); // len[2,3] + VERSION packet
   sftp.push(rest);
   await new Promise<void>((r) => queueMicrotask(r));
+});
+
+// =============================================================================
+// Multi-packet transfer regression tests
+// =============================================================================
+
+/**
+ * Register OPEN/WRITE/READ/FSTAT/CLOSE handlers backed by an in-memory file so
+ * a whole round-trip can be exercised. Reads are sliced at ~32 KB to force the
+ * client to issue multiple packets. Returns counters so tests can assert that
+ * more than one packet was actually exchanged.
+ */
+function serveInMemoryFile(
+  server: SFTP,
+  handle: Uint8Array,
+): { store: () => Uint8Array; counters: { writes: number; reads: number } } {
+  let store = new Uint8Array(0);
+  const counters = { writes: 0, reads: 0 };
+
+  server.on('OPEN', (id: number) => server.handle(id, handle));
+  server.on('FSTAT', (id: number) => server.attrs(id, { size: store.length }));
+
+  server.on('WRITE', (id: number, _h: SFTPHandle, offset: number, data: Uint8Array) => {
+    counters.writes++;
+    const end = offset + data.length;
+    if (end > store.length) {
+      const grown = new Uint8Array(end);
+      grown.set(store);
+      store = grown;
+    }
+    store.set(data, offset);
+    server.status(id, STATUS_CODE.OK);
+  });
+
+  server.on('READ', (id: number, _h: SFTPHandle, offset: number, len: number) => {
+    counters.reads++;
+    if (offset >= store.length) {
+      server.status(id, STATUS_CODE.EOF);
+    } else {
+      // Honour the requested length, like a real server, so the reply never
+      // overflows the client's read buffer.
+      server.data(id, store.subarray(offset, Math.min(offset + len, store.length)));
+    }
+  });
+
+  server.on('CLOSE', (id: number) => server.status(id, STATUS_CODE.OK));
+
+  return { store: () => store, counters };
+}
+
+Deno.test('SFTP: writeFile/readFile round-trip a payload larger than one packet', async () => {
+  await runSFTPTest('large round-trip', async (client, server) => {
+    const handle = new Uint8Array([0x42]);
+    const state = serveInMemoryFile(server, handle);
+
+    // 100 KB — several packets past the ~31952 B max payload
+    const content = new Uint8Array(100 * 1024);
+    for (let i = 0; i < content.length; i++) content[i] = (i * 31 + 7) & 0xff;
+
+    await client.writeFile('/big.bin', content);
+    // Must have taken more than one WRITE packet (proves chunking)
+    assertEquals(state.counters.writes > 1, true);
+
+    const readBack = await client.readFile('/big.bin');
+    assertEquals(state.counters.reads > 1, true);
+    assertEquals(readBack, content);
+  });
+});
+
+Deno.test('SFTP: write() splits a large buffer across packets', async () => {
+  await runSFTPTest('large write', async (client, server) => {
+    const handle = new Uint8Array([0x43]);
+    const state = serveInMemoryFile(server, handle);
+
+    const content = new Uint8Array(80 * 1024);
+    for (let i = 0; i < content.length; i++) content[i] = (i * 13 + 3) & 0xff;
+
+    const wh = await client.open('/w.bin', 'w');
+    await client.write(wh, content, 0, content.length, 0);
+    await client.close(wh);
+
+    assertEquals(state.counters.writes > 1, true);
+    assertEquals(state.store(), content);
+  });
+});
+
+Deno.test('SFTP: WriteStream transfers a buffer larger than one packet intact', async () => {
+  await runSFTPTest('writestream large', async (client, server) => {
+    const handle = new Uint8Array([0x44]);
+    const state = serveInMemoryFile(server, handle);
+
+    const content = new Uint8Array(70 * 1024);
+    for (let i = 0; i < content.length; i++) content[i] = (i * 7 + 1) & 0xff;
+
+    const stream = new WriteStream(client, '/stream.bin');
+    await new Promise<void>((resolve, reject) => {
+      stream.on('error', reject);
+      stream.on('close', () => resolve());
+      stream.write(content, (err) => {
+        if (err) reject(err);
+        else stream.end();
+      });
+    });
+
+    assertEquals(state.counters.writes > 1, true);
+    assertEquals(state.store(), content);
+  });
+});
+
+Deno.test('SFTP: readdir(path) terminates on the end-of-listing EOF status', async () => {
+  await runSFTPTest('readdir path EOF', async (client, server) => {
+    const handle = new Uint8Array([0xcc, 0xdd]);
+    const entries = [
+      {
+        filename: 'a.txt',
+        longname: '-rw-r--r-- 1 user group 10 Jan 1 a.txt',
+        attrs: { mode: 0o100644, size: 10, uid: 0, gid: 0, atime: 0, mtime: 0 },
+      },
+      {
+        filename: 'b.txt',
+        longname: '-rw-r--r-- 1 user group 20 Jan 1 b.txt',
+        attrs: { mode: 0o100644, size: 20, uid: 0, gid: 0, atime: 0, mtime: 0 },
+      },
+    ];
+
+    server.on('OPENDIR', (id: number, path: string) => {
+      assertEquals(path, '/eofdir');
+      server.handle(id, handle);
+    });
+
+    let call = 0;
+    server.on('READDIR', (id: number) => {
+      if (call++ === 0) {
+        server.name(id, entries);
+      } else {
+        // Real servers signal end-of-listing with an EOF status, not empty NAME
+        server.status(id, STATUS_CODE.EOF);
+      }
+    });
+
+    server.on('CLOSE', (id: number) => server.status(id, STATUS_CODE.OK));
+
+    const result = await client.readdir('/eofdir');
+    assertEquals(result.length, 2);
+    assertEquals(result[0].filename, 'a.txt');
+    assertEquals(result[1].filename, 'b.txt');
+  });
 });

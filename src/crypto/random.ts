@@ -19,7 +19,9 @@ export function randomBytes(size: number): Uint8Array {
  */
 export function randomFill(buffer: Uint8Array, offset: number = 0, size?: number): Uint8Array {
   const end = size !== undefined ? offset + size : buffer.length;
-  const view = buffer.subarray(offset, end);
+  // subarray() widens to Uint8Array<ArrayBufferLike>; getRandomValues needs an
+  // ArrayBuffer-backed view (never SharedArrayBuffer here).
+  const view = buffer.subarray(offset, end) as Uint8Array<ArrayBuffer>;
   crypto.getRandomValues(view);
   return buffer;
 }

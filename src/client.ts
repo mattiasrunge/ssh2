@@ -306,7 +306,7 @@ export class Client extends EventEmitter<ClientEvents> {
   private _forwarding: Map<string, boolean> = new Map();
   private _acceptX11 = 0;
   private _readyTimeout?: number;
-  private _keepaliveTimer?: number;
+  private _keepaliveTimer?: ReturnType<typeof setInterval>;
   private _keepaliveCount = 0;
   private _agent?: Agent;
   private _agentCtx?: AgentContext;

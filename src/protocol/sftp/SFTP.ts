@@ -454,7 +454,11 @@ export class SFTP extends EventEmitter {
   }
 
   /**
-   * Write to a file
+   * Write to a file.
+   *
+   * Writes all `length` bytes, splitting into multiple WRITE packets when the
+   * payload exceeds the negotiated max packet size. Resolves once every chunk
+   * has been acknowledged.
    */
   write(
     handle: SFTPHandle,
@@ -469,8 +473,37 @@ export class SFTP extends EventEmitter {
     if (offset >= buffer.length) throw new Error('offset out of bounds');
     if (offset + length > buffer.length) throw new Error('length extends past buffer');
 
-    const writeLen = Math.min(length, this._maxWriteLen);
-    const data = buffer.subarray(offset, offset + writeLen);
+    return this._writeAll(handle, buffer, offset, length, position);
+  }
+
+  /** Write all `length` bytes, splitting into `_maxWriteLen`-sized WRITE packets. */
+  private async _writeAll(
+    handle: SFTPHandle,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: number | bigint,
+  ): Promise<void> {
+    let written = 0;
+    let pos = BigInt(position);
+
+    while (written < length) {
+      const chunkLen = Math.min(length - written, this._maxWriteLen);
+      await this._writeChunk(handle, buffer, offset + written, chunkLen, pos);
+      written += chunkLen;
+      pos += BigInt(chunkLen);
+    }
+  }
+
+  /** Send a single WRITE packet (at most `_maxWriteLen` bytes). */
+  private _writeChunk(
+    handle: SFTPHandle,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: bigint,
+  ): Promise<void> {
+    const data = buffer.subarray(offset, offset + length);
 
     const buf = allocBytes(4 + 1 + 4 + 4 + handle.length + 8 + 4 + data.length);
     let p = 0;
@@ -633,7 +666,15 @@ export class SFTP extends EventEmitter {
       try {
         const entries: DirEntry[] = [];
         while (true) {
-          const list = await this._readdirHandleAsync(dirHandle);
+          let list: DirEntry[] | undefined;
+          try {
+            list = await this._readdirHandleAsync(dirHandle);
+          } catch (err) {
+            // Servers signal end-of-listing with an EOF status rather than an
+            // empty NAME response; treat that as a clean terminator.
+            if ((err as Error & { code?: number }).code === STATUS_CODE.EOF) break;
+            throw err;
+          }
           if (!list || list.length === 0) break;
           entries.push(...list);
         }
@@ -876,39 +917,29 @@ export class SFTP extends EventEmitter {
 
     const handle = await this.open(path, 'r');
     try {
-      const stats = await this.fstat(handle);
-      const size = stats?.size;
-      const fileSize = typeof size === 'bigint' ? Number(size) : (size ?? 0);
+      // Read until EOF regardless of the reported size: a single read() only
+      // returns up to one packet, so loop and accumulate chunks.
+      const chunks: Uint8Array[] = [];
+      let offset = 0;
+      const chunkSize = this._maxReadLen;
 
-      if (fileSize === 0) {
-        // Unknown size or empty file - read until EOF
-        const chunks: Uint8Array[] = [];
-        let offset = 0;
-        const chunkSize = 32768;
-
-        while (true) {
-          const buf = new Uint8Array(chunkSize);
-          const bytesRead = await this.read(handle, buf, 0, chunkSize, offset);
-          if (bytesRead === 0) break;
-          chunks.push(buf.subarray(0, bytesRead));
-          offset += bytesRead;
-        }
-
-        // Combine chunks
-        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-        const result = new Uint8Array(totalLength);
-        let pos = 0;
-        for (const chunk of chunks) {
-          result.set(chunk, pos);
-          pos += chunk.length;
-        }
-        return result;
-      } else {
-        // Known size - read in one go
-        const buf = new Uint8Array(fileSize);
-        const bytesRead = await this.read(handle, buf, 0, fileSize, 0);
-        return buf.subarray(0, bytesRead);
+      while (true) {
+        const buf = new Uint8Array(chunkSize);
+        const bytesRead = await this.read(handle, buf, 0, chunkSize, offset);
+        if (bytesRead === 0) break;
+        chunks.push(buf.subarray(0, bytesRead));
+        offset += bytesRead;
       }
+
+      // Combine chunks
+      const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+      const result = new Uint8Array(totalLength);
+      let pos = 0;
+      for (const chunk of chunks) {
+        result.set(chunk, pos);
+        pos += chunk.length;
+      }
+      return result;
     } finally {
       await this.close(handle);
     }
