@@ -385,7 +385,7 @@ export const DEFAULT_COMPRESSION = [
 /** All supported compression algorithms. */
 export const SUPPORTED_COMPRESSION = [...DEFAULT_COMPRESSION];
 
-/** Whether Curve25519 key exchange is supported (always true; provided via @noble/curves). */
+/** Whether Curve25519 key exchange is supported (always true; provided via Web Crypto). */
 export const curve25519Supported = true;
-/** Whether Ed25519 signatures are supported (always true; provided via @noble/curves). */
+/** Whether Ed25519 signatures are supported (always true; provided via Web Crypto). */
 export const eddsaSupported = true;

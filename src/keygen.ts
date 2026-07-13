@@ -4,7 +4,6 @@
  * Generate SSH key pairs in OpenSSH format using Web Crypto API.
  */
 
-import { ed25519 } from '@noble/curves/ed25519';
 import { pbkdf as bcryptPbkdf } from 'bcrypt-pbkdf';
 import { randomBytes } from './crypto/mod.ts';
 import { CIPHER_INFO } from './protocol/constants.ts';
@@ -121,13 +120,21 @@ async function generateECDSAKeys(
 }
 
 /**
- * Generate Ed25519 key pair using @noble/curves
+ * Generate Ed25519 key pair using Web Crypto
  */
-function generateEd25519Keys(): { pub: Uint8Array; priv: Uint8Array } {
-  const privKey = ed25519.utils.randomPrivateKey();
-  const pubKey = ed25519.getPublicKey(privKey);
+async function generateEd25519Keys(): Promise<{ pub: Uint8Array; priv: Uint8Array }> {
+  const keyPair = await crypto.subtle.generateKey('Ed25519', true, [
+    'sign',
+    'verify',
+  ]) as CryptoKeyPair;
 
-  return { pub: pubKey, priv: privKey };
+  const pub = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
+  // The RFC 8410 PKCS#8 encoding is a fixed 16-byte header + 0x04 0x20 + the
+  // 32-byte seed, so the seed is always the last 32 bytes.
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', keyPair.privateKey));
+  const priv = pkcs8.slice(pkcs8.length - 32);
+
+  return { pub, priv };
 }
 
 /**
@@ -329,7 +336,7 @@ function parseDERs(keyType: string, pub: Uint8Array, priv: Uint8Array): ParsedKe
     }
 
     case 'ed25519': {
-      // For ed25519, pub and priv are raw bytes from @noble/curves
+      // For ed25519, pub and priv are the raw public key and seed bytes
       const pubBin = pub;
       const privBin = priv;
 
@@ -654,7 +661,7 @@ export async function generateKeyPair(keyType: string, opts?: KeyGenOptions): Pr
     }
 
     case 'ed25519': {
-      const { pub, priv } = generateEd25519Keys();
+      const { pub, priv } = await generateEd25519Keys();
       return convertKeys('ed25519', pub, priv, opts);
     }
 

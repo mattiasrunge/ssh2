@@ -4,7 +4,7 @@
  * Implements AES-GCM, AES-CTR, AES-CBC, and ChaCha20-Poly1305 ciphers for SSH protocol.
  */
 
-import { cbc } from '@noble/ciphers/aes';
+import { decryptNoPad, encryptNoPad } from './aes-cbc.ts';
 import type { CipherInfo, MACInfo } from '../protocol/constants.ts';
 import { allocBytes, concatBytes, readUInt32BE, writeUInt32BE } from '../utils/binary.ts';
 import { ChaChaPolyCipher, ChaChaPolyDecipher } from './chacha20.ts';
@@ -462,6 +462,8 @@ export class GenericCipher implements Cipher {
   private _dead = false;
   // Queue to serialize writes
   private _writeQueue: Promise<void> = Promise.resolve();
+  // Queue to serialize CBC encryption (next IV = last ciphertext block)
+  private _cbcQueue: Promise<void> = Promise.resolve();
 
   constructor(config: CipherConfig) {
     const enc = config.outbound;
@@ -544,26 +546,36 @@ export class GenericCipher implements Cipher {
     let lenBytes: Uint8Array | undefined;
 
     if (this._cipherMode === 'AES-CBC') {
-      // Use @noble/ciphers for raw AES-CBC (no PKCS#7 padding).
-      // noble/ciphers is synchronous so IV update happens before any await,
-      // preserving correct ordering when encrypt() is called concurrently.
-      if (this._macETM) {
-        lenBytes = packet.subarray(0, 4);
-        const toEncrypt = packet.subarray(4);
-        encrypted = cbc(this._encKeyRaw, this._encIV, { disablePadding: true }).encrypt(toEncrypt);
-        // Update IV to last ciphertext block for next packet
-        this._encIV.set(encrypted.subarray(encrypted.length - this._blockLen));
-        mac = await hmac(
-          this._macAlgorithm,
-          this._macKey,
-          concatBytes([seqnoBuf, lenBytes, encrypted]),
-        );
-      } else {
-        // MAC-then-Encrypt: MAC is over plaintext, then encrypt
-        encrypted = cbc(this._encKeyRaw, this._encIV, { disablePadding: true }).encrypt(packet);
-        // Update IV to last ciphertext block for next packet
-        this._encIV.set(encrypted.subarray(encrypted.length - this._blockLen));
-        mac = await hmac(this._macAlgorithm, this._macKey, concatBytes([seqnoBuf, packet]));
+      // Raw AES-CBC (no PKCS#7 padding) via Web Crypto. Each packet's IV is
+      // the previous packet's last ciphertext block and Web Crypto is async,
+      // so encryption is serialized through its own queue to preserve IV
+      // ordering when encrypt() is called concurrently.
+      const previousEncrypt = this._cbcQueue;
+      const { resolve: encryptDone, promise: encryptTurn } = Promise.withResolvers<void>();
+      this._cbcQueue = encryptTurn;
+      await previousEncrypt;
+      try {
+        const key = await this._getKey();
+        if (this._macETM) {
+          lenBytes = packet.subarray(0, 4);
+          const toEncrypt = packet.subarray(4);
+          encrypted = await encryptNoPad(key, this._encIV, toEncrypt);
+          // Update IV to last ciphertext block for next packet
+          this._encIV.set(encrypted.subarray(encrypted.length - this._blockLen));
+          mac = await hmac(
+            this._macAlgorithm,
+            this._macKey,
+            concatBytes([seqnoBuf, lenBytes, encrypted]),
+          );
+        } else {
+          // MAC-then-Encrypt: MAC is over plaintext, then encrypt
+          encrypted = await encryptNoPad(key, this._encIV, packet);
+          // Update IV to last ciphertext block for next packet
+          this._encIV.set(encrypted.subarray(encrypted.length - this._blockLen));
+          mac = await hmac(this._macAlgorithm, this._macKey, concatBytes([seqnoBuf, packet]));
+        }
+      } finally {
+        encryptDone();
       }
     } else {
       // AES-CTR: use Web Crypto.
@@ -682,12 +694,17 @@ export class GenericDecipher implements Decipher {
 
   private async _getKey(): Promise<CryptoKey> {
     if (!this._decKey) {
+      // CBC also needs 'encrypt': decryptNoPad crafts a trailer block with
+      // a single-block encryption to bypass Web Crypto's PKCS#7 handling
+      const usages: KeyUsage[] = this._cipherMode === 'AES-CBC'
+        ? ['encrypt', 'decrypt']
+        : ['decrypt'];
       this._decKey = await crypto.subtle.importKey(
         'raw',
         this._decKeyRaw as BufferSource,
         { name: this._cipherMode },
         false,
-        ['decrypt'],
+        usages,
       );
     }
     return this._decKey;
@@ -734,8 +751,9 @@ export class GenericDecipher implements Decipher {
           // Decrypt first block to get length
           let decryptedBlock: Uint8Array;
           if (this._cipherMode === 'AES-CBC') {
-            // noble/ciphers provides raw AES-CBC without PKCS#7 padding requirements
-            decryptedBlock = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(
+            decryptedBlock = await decryptNoPad(
+              await this._getKey(),
+              this._decIV,
               this._firstBlock!,
             );
           } else {
@@ -815,9 +833,7 @@ export class GenericDecipher implements Decipher {
           const lastCiphertextBlock = new Uint8Array(
             this._packet!.subarray(this._packet!.length - this._blockLen),
           );
-          plaintext = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(
-            this._packet!,
-          );
+          plaintext = await decryptNoPad(await this._getKey(), this._decIV, this._packet!);
           this._decIV.set(lastCiphertextBlock);
         } else {
           const key = await this._getKey();
@@ -846,9 +862,7 @@ export class GenericDecipher implements Decipher {
             const lastCiphertextBlock = new Uint8Array(
               remaining.subarray(remaining.length - this._blockLen),
             );
-            const decrypted = cbc(this._decKeyRaw, this._decIV, { disablePadding: true }).decrypt(
-              remaining,
-            );
+            const decrypted = await decryptNoPad(await this._getKey(), this._decIV, remaining);
             this._packet!.set(decrypted, this._blockLen);
             // Update IV to last ciphertext block for next packet
             this._decIV.set(lastCiphertextBlock);

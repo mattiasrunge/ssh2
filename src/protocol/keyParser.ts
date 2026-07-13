@@ -9,8 +9,8 @@
  * - RFC4716 public keys
  */
 
-import { cbc, ctr, gcm } from '@noble/ciphers/aes';
 import { pbkdf as bcrypt_pbkdf } from 'bcrypt-pbkdf';
+import { decryptNoPad, importCbcKey } from '../crypto/aes-cbc.ts';
 import { Ber, BerReader, BerWriter } from '../utils/ber.ts';
 import {
   allocBytes,
@@ -1071,7 +1071,14 @@ async function parseOpenSSHPrivate(
     }
 
     try {
-      privBlob = decryptPrivateKey(privBlob, cipherKey, cipherIV, encInfo, data, data._pos || 0);
+      privBlob = await decryptPrivateKey(
+        privBlob,
+        cipherKey,
+        cipherIV,
+        encInfo,
+        data,
+        data._pos || 0,
+      );
     } catch (ex) {
       return ex as Error;
     }
@@ -1095,31 +1102,55 @@ async function parseOpenSSHPrivate(
 }
 
 /**
- * Decrypt private key blob using @noble/ciphers (no PKCS#7 padding)
+ * Decrypt private key blob using Web Crypto (no PKCS#7 padding)
  */
-function decryptPrivateKey(
+async function decryptPrivateKey(
   privBlob: Uint8Array,
   cipherKey: Uint8Array,
   cipherIV: Uint8Array,
   encInfo: typeof CIPHER_INFO[keyof typeof CIPHER_INFO],
   data: Uint8Array,
   pos: number,
-): Uint8Array {
+): Promise<Uint8Array> {
   const sslName = encInfo.sslName;
 
   if (sslName.includes('gcm')) {
-    // For GCM, the auth tag follows the encrypted blob in the file
+    // For GCM, the auth tag follows the encrypted blob in the file;
+    // Web Crypto expects ciphertext + tag concatenated
     const authLen = encInfo.authLen || 16;
     const authTag = data.subarray(pos, pos + authLen);
-    // @noble/ciphers gcm expects ciphertext + tag concatenated
     const ciphertextWithTag = allocBytes(privBlob.length + authLen);
     ciphertextWithTag.set(privBlob, 0);
     ciphertextWithTag.set(authTag, privBlob.length);
-    return gcm(cipherKey, cipherIV).decrypt(ciphertextWithTag);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      cipherKey as Uint8Array<ArrayBuffer>,
+      'AES-GCM',
+      false,
+      ['decrypt'],
+    );
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: cipherIV as Uint8Array<ArrayBuffer>, tagLength: authLen * 8 },
+      key,
+      ciphertextWithTag as Uint8Array<ArrayBuffer>,
+    );
+    return new Uint8Array(plaintext);
   } else if (sslName.includes('ctr')) {
-    return ctr(cipherKey, cipherIV).decrypt(privBlob);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      cipherKey as Uint8Array<ArrayBuffer>,
+      'AES-CTR',
+      false,
+      ['decrypt'],
+    );
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-CTR', counter: cipherIV as Uint8Array<ArrayBuffer>, length: 128 },
+      key,
+      privBlob as Uint8Array<ArrayBuffer>,
+    );
+    return new Uint8Array(plaintext);
   } else if (sslName.includes('cbc')) {
-    return cbc(cipherKey, cipherIV, { disablePadding: true }).decrypt(privBlob);
+    return decryptNoPad(await importCbcKey(cipherKey), cipherIV, privBlob);
   } else {
     throw new Error(`Unsupported cipher for OpenSSH key: ${sslName}`);
   }
@@ -1517,7 +1548,7 @@ async function parsePPKPrivate(
 
     const iv = new Uint8Array(16);
     try {
-      privBlob = cbc(decKey, iv, { disablePadding: true }).decrypt(privBlob);
+      privBlob = await decryptNoPad(await importCbcKey(decKey), iv, privBlob);
     } catch {
       return new Error('PPK decryption failed -- bad passphrase?');
     }

@@ -41,7 +41,8 @@ Development/testing is done against OpenSSH (9.x+).
 
 ## Requirements
 
-- [Deno](https://deno.land/) v2.0 or newer
+- [Deno](https://deno.land/) v2.0 or newer (the native Web Crypto functionality used is tested
+  against Deno 2.9)
 
 ## Installation
 
@@ -73,8 +74,9 @@ This fork is a complete rewrite of ssh2 for the Deno ecosystem. The major change
 - **No Windows agent support**: PageantAgent and CygwinAgent have been removed. Only OpenSSHAgent is
   supported.
 - **No HTTPAgent/HTTPSAgent**: These Node.js-specific http.Agent wrappers have been removed.
-- **No native bindings**: The `cpu-features` and C++ crypto bindings have been removed. All
-  cryptography is done in pure TypeScript using `@noble/curves` and `@noble/ciphers`.
+- **No native bindings**: The `cpu-features` and C++ crypto bindings have been removed. Almost all
+  cryptography uses Deno's built-in Web Crypto API; see [Cryptography](#cryptography) for the two
+  remaining pure-TypeScript dependencies.
 - **No encrypted old-style PEM keys**: Legacy PEM keys encrypted with `Proc-Type: 4,ENCRYPTED`
   (using MD5-based EVP_BytesToKey derivation) are not supported. Convert them to the modern OpenSSH
   format with: `ssh-keygen -p -o -f <keyfile>`. Encrypted new-format OpenSSH keys, PPK keys, and all
@@ -789,6 +791,34 @@ via `algorithms.serverHostKey`)
 ### Compression
 
 **Default:** `none`, `zlib@openssh.com`, `zlib`
+
+### Cryptography
+
+Almost all cryptography runs on Deno's built-in
+[Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API) (`crypto.subtle` /
+`crypto.getRandomValues`):
+
+- SHA-1/SHA-256/SHA-384/SHA-512 hashing and HMAC
+- RSA and ECDSA key generation, signing, and verification
+- Ed25519 key generation, signing, and verification
+- Key exchange: X25519 (`curve25519-sha256`) and ECDH over P-256/P-384/P-521
+- AES-CTR and AES-GCM (transport ciphers and private-key decryption)
+- AES-CBC — Web Crypto only offers PKCS#7-padded CBC, so the raw (unpadded) CBC that SSH requires is
+  implemented on top of it in `src/crypto/aes-cbc.ts`
+- Random number generation
+
+Two npm dependencies remain, each used for a single feature that Deno (as of 2.9) has no native
+equivalent for:
+
+- **`npm:@noble/ciphers@1`** — used only for the `chacha20-poly1305@openssh.com` transport cipher
+  (`src/crypto/chacha20.ts`). The OpenSSH construction needs raw ChaCha20 and standalone Poly1305
+  primitives that Deno does not provide.
+- **`npm:bcrypt-pbkdf@1`** — used only for the `bcrypt` KDF when reading or writing
+  passphrase-protected OpenSSH private keys (`src/keygen.ts`, `src/protocol/keyParser.ts`). This is
+  OpenSSH's custom bcrypt-based key derivation, which Deno does not provide.
+
+The long-term goal is to remove these last two dependencies as well, either when Deno gains the
+missing primitives or by vendoring the implementations.
 
 ## License
 
