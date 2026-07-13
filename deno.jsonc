@@ -23,7 +23,6 @@
     "noUnusedParameters": true
   },
   "imports": {
-    "@noble/ciphers": "npm:@noble/ciphers@1",
     "bcrypt-pbkdf": "npm:bcrypt-pbkdf@1",
     "@std/assert": "jsr:@std/assert@1.0.18"
   },
