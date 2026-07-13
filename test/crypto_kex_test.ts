@@ -19,6 +19,24 @@ import {
   toMpint,
   X25519Exchange,
 } from '../src/crypto/kex.ts';
+import { DEFAULT_KEX, SUPPORTED_KEX } from '../src/protocol/constants.ts';
+
+// =============================================================================
+// Advertised algorithms must be implemented (regression guard for S2:
+// advertising an unimplemented KEX makes a peer that selects it fail the handshake)
+// =============================================================================
+
+Deno.test('every advertised KEX algorithm is constructible', () => {
+  for (const algo of SUPPORTED_KEX) {
+    // Must not throw "Unsupported key exchange algorithm".
+    const kex = createKeyExchange(algo);
+    assertEquals(kex.name, algo);
+  }
+  // DEFAULT_KEX is a subset of SUPPORTED_KEX; verify explicitly too.
+  for (const algo of DEFAULT_KEX) {
+    assertEquals(SUPPORTED_KEX.includes(algo), true);
+  }
+});
 
 // =============================================================================
 // toMpint

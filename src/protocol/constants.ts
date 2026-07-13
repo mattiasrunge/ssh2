@@ -286,14 +286,19 @@ export const MAC_INFO: Record<string, MACInfo> = {
   'hmac-sha1-96': macInfo('sha1', 20, 12, false),
 };
 
-/** Default key-exchange algorithms (preferred order, Web Crypto API compatible). */
+/**
+ * Default key-exchange algorithms (preferred order, Web Crypto API compatible).
+ * Every entry here must have an implementation in createKeyExchange() — do not
+ * advertise an algorithm we cannot perform, or a peer that selects it will fail
+ * the handshake. Group-exchange (DH GEX) is intentionally absent: it is not
+ * implemented.
+ */
 export const DEFAULT_KEX = [
   'curve25519-sha256',
   'curve25519-sha256@libssh.org',
   'ecdh-sha2-nistp256',
   'ecdh-sha2-nistp384',
   'ecdh-sha2-nistp521',
-  'diffie-hellman-group-exchange-sha256',
   'diffie-hellman-group14-sha256',
   'diffie-hellman-group16-sha512',
   'diffie-hellman-group18-sha512',
@@ -302,12 +307,16 @@ export const DEFAULT_KEX = [
 /** All supported key-exchange algorithms (superset of {@link DEFAULT_KEX}). */
 export const SUPPORTED_KEX = [
   ...DEFAULT_KEX,
-  'diffie-hellman-group-exchange-sha1',
   'diffie-hellman-group14-sha1',
-  'diffie-hellman-group1-sha1',
 ];
 
-/** Default server host key algorithms (preferred order). */
+/**
+ * Default server host key algorithms (preferred order). `ssh-rsa` (SHA-1 RSA
+ * signatures) is intentionally excluded — matching OpenSSH 8.8+, which disabled
+ * it by default — and kept in {@link SUPPORTED_SERVER_HOST_KEY} for opt-in via
+ * the `algorithms.serverHostKey` config. RSA keys still work by default through
+ * `rsa-sha2-256`/`rsa-sha2-512`.
+ */
 export const DEFAULT_SERVER_HOST_KEY = [
   'ssh-ed25519',
   'ecdsa-sha2-nistp256',
@@ -315,11 +324,13 @@ export const DEFAULT_SERVER_HOST_KEY = [
   'ecdsa-sha2-nistp521',
   'rsa-sha2-512',
   'rsa-sha2-256',
-  'ssh-rsa',
 ];
 
-/** All supported server host key algorithms. */
-export const SUPPORTED_SERVER_HOST_KEY = [...DEFAULT_SERVER_HOST_KEY];
+/** All supported server host key algorithms (superset of {@link DEFAULT_SERVER_HOST_KEY}). */
+export const SUPPORTED_SERVER_HOST_KEY = [
+  ...DEFAULT_SERVER_HOST_KEY,
+  'ssh-rsa',
+];
 
 /** Default cipher algorithms (preferred order). */
 export const DEFAULT_CIPHER = [
@@ -341,19 +352,24 @@ export const SUPPORTED_CIPHER = [
   'aes256-gcm',
 ];
 
-/** Default MAC algorithms (preferred order). */
+/**
+ * Default MAC algorithms (preferred order). SHA-1 MACs are intentionally not
+ * offered by default (kept in {@link SUPPORTED_MAC} for explicit opt-in); the
+ * default ciphers are AEAD (chacha20-poly1305, AES-GCM) where the MAC is
+ * implicit anyway, and any non-AEAD peer we target supports SHA-2 MACs.
+ */
 export const DEFAULT_MAC = [
   'hmac-sha2-256-etm@openssh.com',
   'hmac-sha2-512-etm@openssh.com',
-  'hmac-sha1-etm@openssh.com',
   'hmac-sha2-256',
   'hmac-sha2-512',
-  'hmac-sha1',
 ];
 
 /** All supported MAC algorithms (superset of {@link DEFAULT_MAC}). */
 export const SUPPORTED_MAC = [
   ...DEFAULT_MAC,
+  'hmac-sha1-etm@openssh.com',
+  'hmac-sha1',
   'hmac-sha2-256-96',
   'hmac-sha2-512-96',
   'hmac-sha1-96',

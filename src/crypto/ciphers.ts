@@ -409,21 +409,16 @@ export class AESGCMDecipher implements Decipher {
           ciphertextWithTag as BufferSource,
         );
         plaintext = new Uint8Array(decrypted);
-      } catch (e) {
-        const ivHex = Array.from(this._decIV).map((b) => b.toString(16).padStart(2, '0')).join('');
-        const lenHex = Array.from(this._lenBuf).map((b) => b.toString(16).padStart(2, '0')).join(
-          '',
-        );
-        const cryptoErr = e instanceof Error ? e.message : String(e);
-        throw new Error(
-          `Invalid MAC: seqno=${this.inSeqno}, iv=${ivHex}, len=${lenHex}(${this._len}), ` +
-            `pktLen=${this._pktLen}, tagPos=${this._tagPos}, ` +
-            `ciphertextWithTag.length=${ciphertextWithTag.length}, ` +
-            `cryptoError="${cryptoErr}"`,
-        );
+      } catch {
+        // Do not leak the IV, sequence number, or lengths in the thrown error;
+        // authentication failure is all the caller needs to know.
+        throw new Error('Invalid MAC');
       }
 
       const padLen = plaintext[0];
+      if (padLen > plaintext.length - 1) {
+        throw new Error('Invalid padding length');
+      }
       const payload = plaintext.subarray(1, plaintext.length - padLen);
 
       // Increment IV for next packet

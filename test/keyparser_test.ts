@@ -6,6 +6,7 @@
 
 import { assertEquals, assertExists } from '@std/assert';
 import { parseKey } from '../src/protocol/keyParser.ts';
+import { generateKeyPair } from '../src/keygen.ts';
 import {
   KEY_PARSER_FIXTURES_PATH,
   keyToDetails,
@@ -335,13 +336,16 @@ Deno.test('keyParser RSA private key sign and verify', async () => {
   assertEquals(valid, true);
 });
 
-Deno.test('keyParser ECDSA private key sign produces Uint8Array', async () => {
+Deno.test('keyParser ECDSA private key sign and verify', async () => {
   const privData = await readFixture(`${KEY_PARSER_FIXTURES_PATH}/openssh_new_ecdsa`);
+  const pubData = await readFixture(`${KEY_PARSER_FIXTURES_PATH}/openssh_new_ecdsa.pub`);
 
   const privKey = parseKey(privData);
+  const pubKey = parseKey(pubData);
 
   assertEquals(privKey instanceof Error, false);
-  if (privKey instanceof Error) return;
+  assertEquals(pubKey instanceof Error, false);
+  if (privKey instanceof Error || pubKey instanceof Error) return;
 
   const data = new TextEncoder().encode('ecdsa test message');
   const signature = await privKey.sign(data);
@@ -350,7 +354,59 @@ Deno.test('keyParser ECDSA private key sign produces Uint8Array', async () => {
   if (signature instanceof Error) return;
   assertEquals(signature instanceof Uint8Array, true);
   assertEquals(signature.length > 0, true);
+
+  // Round-trip: verify must accept the SSH-format signature sign() produced.
+  const valid = await pubKey.verify(data, signature);
+  assertEquals(valid, true);
+
+  // Tampering with the signature must fail verification.
+  const badSig = new Uint8Array(signature);
+  badSig[badSig.length - 1] ^= 0xff;
+  const invalid = await pubKey.verify(data, badSig);
+  assertEquals(invalid, false);
 });
+
+// Generate -> parse -> sign -> verify across every ECDSA curve. This covers:
+//  - the curve->oid fallthrough guard (was `algo === undefined`, which never
+//    matched since algo is initialized to null, crashing 384/521 parsing);
+//  - genOpenSSLECDSAPriv normalizing the scalar to the field length (an mpint
+//    with a leading zero otherwise produced a PKCS#8 Web Crypto rejects);
+//  - convertECDSASSHToP1363 field sizes 32/48/66 on the verify path.
+for (
+  const [bits, type] of [
+    [256, 'ecdsa-sha2-nistp256'],
+    [384, 'ecdsa-sha2-nistp384'],
+    [521, 'ecdsa-sha2-nistp521'],
+  ] as const
+) {
+  Deno.test(`keyParser generated ECDSA nistp${bits} parse/sign/verify round-trip`, async () => {
+    let keys;
+    try {
+      keys = await generateKeyPair('ecdsa', { bits });
+    } catch {
+      return; // Curve may be unsupported by this runtime (esp. P-521).
+    }
+
+    const privKey = parseKey(keys.private);
+    const pubKey = parseKey(keys.public);
+    assertEquals(privKey instanceof Error, false);
+    assertEquals(pubKey instanceof Error, false);
+    if (privKey instanceof Error || pubKey instanceof Error) return;
+    assertEquals(privKey.type, type);
+    assertEquals(pubKey.type, type);
+    assertExists(pubKey.getPublicSSH());
+
+    const data = new TextEncoder().encode(`ecdsa nistp${bits} round-trip`);
+    const signature = await privKey.sign(data);
+    if (signature instanceof Error) throw signature;
+
+    assertEquals(await pubKey.verify(data, signature), true);
+
+    const badSig = new Uint8Array(signature);
+    badSig[badSig.length - 1] ^= 0xff;
+    assertEquals(await pubKey.verify(data, badSig), false);
+  });
+}
 
 Deno.test('keyParser Ed25519 private key sign and verify', async () => {
   const privData = await readFixture(`${KEY_PARSER_FIXTURES_PATH}/openssh_new_ed25519`);

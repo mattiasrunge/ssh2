@@ -391,6 +391,18 @@ export class Client extends EventEmitter<ClientEvents> {
     // Set up host verifier
     const hostVerifier = this._buildHostVerifier(config);
 
+    // Without a hostVerifier the server host key is accepted unconditionally,
+    // which leaves the connection open to man-in-the-middle attacks. Surface
+    // this rather than failing silently: through the debug hook if one is set,
+    // otherwise as a one-time console warning.
+    if (!config.hostVerifier) {
+      const msg = 'ssh2-ts: no hostVerifier configured — the server host key is ' +
+        'NOT verified, leaving the connection vulnerable to man-in-the-middle ' +
+        'attacks. Provide a `hostVerifier` to enable host key verification.';
+      if (config.debug) config.debug(msg);
+      else console.warn(msg);
+    }
+
     // Get or create transport
     if (config.transport) {
       this._transport = config.transport;

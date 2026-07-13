@@ -204,6 +204,48 @@ function convertECDSAToSSH(signature: Uint8Array): Uint8Array {
   return result;
 }
 
+/**
+ * Curve field size (bytes per r/s component) for an ECDSA key type.
+ * Returns 0 for an unrecognized type.
+ */
+function ecdsaFieldSize(keyType: string): number {
+  if (keyType.includes('nistp256')) return 32;
+  if (keyType.includes('nistp384')) return 48;
+  if (keyType.includes('nistp521')) return 66;
+  return 0;
+}
+
+/**
+ * Convert an ECDSA signature from SSH format (two mpints) to P1363 (r||s, each
+ * left-padded to the curve field size). Inverse of convertECDSAToSSH. Returns
+ * null if the signature is malformed. Web Crypto's ECDSA verify only accepts
+ * P1363, so signatures coming off the wire / from sign() must be converted first.
+ */
+function convertECDSASSHToP1363(signature: Uint8Array, fieldSize: number): Uint8Array | null {
+  let offset = 0;
+  const readInt = (): Uint8Array | null => {
+    if (offset + 4 > signature.length) return null;
+    const len = readUInt32BE(signature, offset);
+    offset += 4;
+    if (len > signature.length - offset) return null;
+    let v = signature.subarray(offset, offset + len);
+    offset += len;
+    // Strip leading zero bytes (mpint sign/padding) down to the raw integer.
+    let start = 0;
+    while (start < v.length && v[start] === 0) start++;
+    v = v.subarray(start);
+    if (v.length > fieldSize) return null;
+    return v;
+  };
+  const r = readInt();
+  const s = readInt();
+  if (r === null || s === null) return null;
+  const out = allocBytes(fieldSize * 2);
+  out.set(r, fieldSize - r.length);
+  out.set(s, fieldSize * 2 - s.length);
+  return out;
+}
+
 // Exported for private key generation
 function bigIntFromBuffer(buf: Uint8Array): bigint {
   let hex = '0x';
@@ -389,6 +431,23 @@ export function genOpenSSLECDSAPriv(
   pub: Uint8Array,
   priv: Uint8Array,
 ): string {
+  // SEC1 requires the private key OCTET STRING to be exactly the curve field
+  // length. OpenSSH stores the scalar as an mpint, which can carry a leading
+  // zero byte (when the high bit is set) or have leading zeros stripped; both
+  // make Web Crypto reject the PKCS#8 with "Invalid key format". Normalize to
+  // the fixed field length derived from the public point (0x04 || X || Y).
+  if (pub.length >= 3 && pub[0] === 0x04 && (pub.length - 1) % 2 === 0) {
+    const fieldLen = (pub.length - 1) >> 1;
+    let start = 0;
+    while (start < priv.length && priv[start] === 0) start++;
+    const stripped = priv.subarray(start);
+    if (stripped.length <= fieldLen) {
+      const padded = allocBytes(fieldLen);
+      padded.set(stripped, fieldLen - stripped.length);
+      priv = padded;
+    }
+  }
+
   // Generate SEC1 EC private key structure first
   const sec1Writer = new BerWriter();
   sec1Writer.startSequence();
@@ -515,10 +574,19 @@ function createBaseKey(
       try {
         const keyData = await importPublicKey(pem, this.type, hashAlgo);
         if (keyData instanceof Error) return keyData;
+        let sig = signature;
+        // Web Crypto ECDSA verify requires IEEE-P1363 (r||s); SSH signatures
+        // (off the wire or from sign()) are two mpints and must be converted.
+        if (this.type.startsWith('ecdsa-sha2-')) {
+          const fieldSize = ecdsaFieldSize(this.type);
+          const p1363 = fieldSize ? convertECDSASSHToP1363(signature, fieldSize) : null;
+          if (!p1363) return false;
+          sig = p1363;
+        }
         return await crypto.subtle.verify(
           keyData.algorithm,
           keyData.key,
-          signature as BufferSource,
+          sig as BufferSource,
           data as BufferSource,
         );
       } catch (ex) {
@@ -721,7 +789,7 @@ async function importPublicKey(
         );
         return {
           key,
-          algorithm: { name: 'ECDSA', hash: hashAlgo.toUpperCase() },
+          algorithm: { name: 'ECDSA', hash: normalizeHashAlgo(hashAlgo) },
         };
       }
       default:
@@ -804,13 +872,15 @@ function parseDER(
       oid = '1.2.840.10045.3.1.7';
     // FALLTHROUGH
     case 'ecdsa-sha2-nistp384':
-      if (algo === undefined) {
+      // Guard on oid (undefined until set here); algo may be initialized to null,
+      // so `algo === undefined` never matched and left oid unset for 384/521.
+      if (oid === undefined) {
         algo = 'sha384';
         oid = '1.3.132.0.34';
       }
     // FALLTHROUGH
     case 'ecdsa-sha2-nistp521': {
-      if (algo === undefined) {
+      if (oid === undefined) {
         algo = 'sha512';
         oid = '1.3.132.0.35';
       }
@@ -1133,13 +1203,15 @@ function parseOpenSSHPrivKeys(
         oid = '1.2.840.10045.3.1.7';
         // FALLTHROUGH
       case 'ecdsa-sha2-nistp384':
-        if (algo === undefined) {
+        // Guard on oid (undefined until set here); algo is initialized to null,
+        // so `algo === undefined` never matched and left oid unset for 384/521.
+        if (oid === undefined) {
           algo = 'sha384';
           oid = '1.3.132.0.34';
         }
         // FALLTHROUGH
       case 'ecdsa-sha2-nistp521': {
-        if (algo === undefined) {
+        if (oid === undefined) {
           algo = 'sha512';
           oid = '1.3.132.0.35';
         }

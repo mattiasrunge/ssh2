@@ -519,27 +519,27 @@ import { Client, generateKeyPair, parseKey, Server } from 'jsr:@ein/ssh2-ts';
 
 - **connect**(config: ClientConfig): Promise\<void\> - Connects to an SSH server. Config properties:
 
-  | Property            | Type                                                         | Default       | Description                                       |
-  | ------------------- | ------------------------------------------------------------ | ------------- | ------------------------------------------------- |
-  | `host`              | string                                                       | `'localhost'` | Hostname or IP address                            |
-  | `port`              | number                                                       | `22`          | Port number                                       |
-  | `username`          | string                                                       |               | Username for authentication                       |
-  | `password`          | string                                                       |               | Password for password auth                        |
-  | `privateKey`        | string \| Uint8Array \| ParsedKey                            |               | Private key for key-based auth                    |
-  | `passphrase`        | string                                                       |               | Passphrase for encrypted private key              |
-  | `agent`             | string                                                       |               | Path to ssh-agent UNIX socket                     |
-  | `agentForward`      | boolean                                                      | `false`       | Enable agent forwarding                           |
-  | `hostHash`          | string                                                       |               | Hash algorithm for hostVerifier (e.g. `'sha256'`) |
-  | `hostVerifier`      | (key: Uint8Array \| string) => boolean \| Promise\<boolean\> |               | Host key verification function                    |
-  | `algorithms`        | AlgorithmConfig                                              |               | Override default algorithms                       |
-  | `readyTimeout`      | number                                                       | `20000`       | Handshake timeout (ms)                            |
-  | `keepaliveInterval` | number                                                       | `0`           | Keepalive interval (ms)                           |
-  | `keepaliveCountMax` | number                                                       | `3`           | Max unanswered keepalives                         |
-  | `sock`              | Transport                                                    |               | Existing transport for connection hopping         |
-  | `strictVendor`      | boolean                                                      | `true`        | Strict server vendor check                        |
-  | `tryKeyboard`       | boolean                                                      | `false`       | Try keyboard-interactive auth                     |
-  | `authHandler`       | AuthHandler                                                  |               | Custom authentication handler                     |
-  | `debug`             | (msg: string) => void                                        |               | Debug logging function                            |
+  | Property            | Type                                                         | Default       | Description                                                                                                                                                                           |
+  | ------------------- | ------------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `host`              | string                                                       | `'localhost'` | Hostname or IP address                                                                                                                                                                |
+  | `port`              | number                                                       | `22`          | Port number                                                                                                                                                                           |
+  | `username`          | string                                                       |               | Username for authentication                                                                                                                                                           |
+  | `password`          | string                                                       |               | Password for password auth                                                                                                                                                            |
+  | `privateKey`        | string \| Uint8Array \| ParsedKey                            |               | Private key for key-based auth                                                                                                                                                        |
+  | `passphrase`        | string                                                       |               | Passphrase for encrypted private key                                                                                                                                                  |
+  | `agent`             | string                                                       |               | Path to ssh-agent UNIX socket                                                                                                                                                         |
+  | `agentForward`      | boolean                                                      | `false`       | Enable agent forwarding                                                                                                                                                               |
+  | `hostHash`          | string                                                       |               | Hash algorithm for hostVerifier (e.g. `'sha256'`)                                                                                                                                     |
+  | `hostVerifier`      | (key: Uint8Array \| string) => boolean \| Promise\<boolean\> |               | Host key verification function. **If omitted, the server host key is accepted without verification, leaving the connection open to man-in-the-middle attacks** (a warning is logged). |
+  | `algorithms`        | AlgorithmConfig                                              |               | Override default algorithms                                                                                                                                                           |
+  | `readyTimeout`      | number                                                       | `20000`       | Handshake timeout (ms)                                                                                                                                                                |
+  | `keepaliveInterval` | number                                                       | `0`           | Keepalive interval (ms)                                                                                                                                                               |
+  | `keepaliveCountMax` | number                                                       | `3`           | Max unanswered keepalives                                                                                                                                                             |
+  | `sock`              | Transport                                                    |               | Existing transport for connection hopping                                                                                                                                             |
+  | `strictVendor`      | boolean                                                      | `true`        | Strict server vendor check                                                                                                                                                            |
+  | `tryKeyboard`       | boolean                                                      | `false`       | Try keyboard-interactive auth                                                                                                                                                         |
+  | `authHandler`       | AuthHandler                                                  |               | Custom authentication handler                                                                                                                                                         |
+  | `debug`             | (msg: string) => void                                        |               | Debug logging function                                                                                                                                                                |
 
 - **end**(): void - Disconnects the socket.
 
@@ -757,18 +757,19 @@ Server-specific (for exec/shell):
 - `ecdh-sha2-nistp256`
 - `ecdh-sha2-nistp384`
 - `ecdh-sha2-nistp521`
-- `diffie-hellman-group-exchange-sha256`
 - `diffie-hellman-group14-sha256`
 - `diffie-hellman-group16-sha512`
 - `diffie-hellman-group18-sha512`
 
-**Also supported:** `diffie-hellman-group-exchange-sha1`, `diffie-hellman-group14-sha1`,
-`diffie-hellman-group1-sha1`
+**Also supported:** `diffie-hellman-group14-sha1`
 
 ### Server Host Key
 
 **Default:** `ssh-ed25519`, `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`,
-`rsa-sha2-512`, `rsa-sha2-256`, `ssh-rsa`
+`rsa-sha2-512`, `rsa-sha2-256`
+
+**Also supported:** `ssh-rsa` (SHA-1 RSA signatures; disabled by default like OpenSSH 8.8+, enable
+via `algorithms.serverHostKey`)
 
 ### Cipher
 
@@ -779,10 +780,11 @@ Server-specific (for exec/shell):
 
 ### HMAC
 
-**Default:** `hmac-sha2-256-etm@openssh.com`, `hmac-sha2-512-etm@openssh.com`,
-`hmac-sha1-etm@openssh.com`, `hmac-sha2-256`, `hmac-sha2-512`, `hmac-sha1`
+**Default:** `hmac-sha2-256-etm@openssh.com`, `hmac-sha2-512-etm@openssh.com`, `hmac-sha2-256`,
+`hmac-sha2-512`
 
-**Also supported:** `hmac-sha2-256-96`, `hmac-sha2-512-96`, `hmac-sha1-96`
+**Also supported:** `hmac-sha1-etm@openssh.com`, `hmac-sha1`, `hmac-sha2-256-96`,
+`hmac-sha2-512-96`, `hmac-sha1-96`
 
 ### Compression
 

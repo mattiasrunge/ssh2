@@ -6,6 +6,9 @@ on:
       - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - master
 
 jobs:
   test:
@@ -16,6 +19,12 @@ jobs:
         with:
           deno-version: v2.x # Run with latest stable Deno.
 
+      # Install sshpass so the OpenSSH interop tests (which drive the `ssh`
+      # client with password auth) run instead of being skipped. The `ssh`
+      # client itself is already present on ubuntu-latest runners.
+      - name: Install sshpass for OpenSSH interop tests
+        run: sudo apt-get update && sudo apt-get install -y sshpass
+
       # Check if the code is formatted according to Deno's default
       # formatting conventions.
       - run: deno fmt --check
@@ -24,8 +33,8 @@ jobs:
       # you want to use a custom linter configuration you can add a configuration file with --config <myconfig>
       - run: deno lint
 
-      # Run all test files in the repository and collect code coverage. The example
-      # runs with all permissions, but it is recommended to run with the minimal permissions your program needs (for example --allow-read).
+      # Run all test files in the repository. Uses broad permissions because the
+      # integration tests need network, filesystem, subprocess, and env access.
       - run: deno task test
 
       # Check if the code is publishable.

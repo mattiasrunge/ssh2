@@ -24,10 +24,6 @@ import {
 } from './constants.ts';
 import { makeBufferParser } from './utils.ts';
 
-// Constants
-const GEX_MIN_BITS = 2048; // RFC 8270
-const GEX_MAX_BITS = 8192; // RFC 8270
-
 /**
  * Encode a byte array as an SSH mpint (used for shared secret in key derivation)
  * Per RFC 4253, the shared secret K must be encoded as mpint for key derivation
@@ -659,5 +655,3 @@ export class KexHandler {
     this._state = { sessionId };
   }
 }
-
-export { GEX_MAX_BITS, GEX_MIN_BITS };

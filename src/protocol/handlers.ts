@@ -10,7 +10,7 @@
 import { allocBytes, toUtf8, writeUInt32BE } from '../utils/binary.ts';
 import { CHANNEL_OPEN_FAILURE, COMPAT, MESSAGE, TERMINAL_MODE } from './constants.ts';
 import { parseKey } from './keyParser.ts';
-import { doFatalError, type FatalErrorProtocol, makeBufferParser, sigSSHToASN1 } from './utils.ts';
+import { doFatalError, type FatalErrorProtocol, makeBufferParser } from './utils.ts';
 
 // Create reverse mapping for terminal modes
 const TERMINAL_MODE_BY_VALUE: Record<number, string> = {};
@@ -375,21 +375,20 @@ export function createMessageHandlers(): MessageHandler[] {
                 signature = signature.subarray(4 + keyAlgo.length + 4);
               }
 
-              const convertedSig = sigSSHToASN1(signature, realKeyAlgo!);
-              if (convertedSig) {
-                const sessionID = self._kex.sessionID;
-                const blob = allocBytes(4 + sessionID.length + blobEnd);
-                writeUInt32BE(blob, sessionID.length, 0);
-                blob.set(sessionID, 4);
-                blob.set(payload.subarray(0, blobEnd), 4 + sessionID.length);
-                methodData = {
-                  keyAlgo: realKeyAlgo,
-                  key,
-                  signature: convertedSig,
-                  blob,
-                  hashAlgo,
-                };
-              }
+              const sessionID = self._kex.sessionID;
+              const blob = allocBytes(4 + sessionID.length + blobEnd);
+              writeUInt32BE(blob, sessionID.length, 0);
+              blob.set(sessionID, 4);
+              blob.set(payload.subarray(0, blobEnd), 4 + sessionID.length);
+              methodData = {
+                // Pass the SSH-format signature through unchanged; ParsedKey.verify()
+                // performs the per-algorithm conversion (ECDSA mpints -> P1363).
+                keyAlgo: realKeyAlgo,
+                key,
+                signature,
+                blob,
+                hashAlgo,
+              };
             }
           } else {
             methodData = { keyAlgo: realKeyAlgo, key, hashAlgo };
@@ -427,23 +426,22 @@ export function createMessageHandlers(): MessageHandler[] {
             signature = signature.subarray(4 + keyAlgo.length + 4);
           }
 
-          const convertedSig = sigSSHToASN1(signature, realKeyAlgo!);
-          if (convertedSig !== undefined) {
-            const sessionID = self._kex.sessionID;
-            const blob = allocBytes(4 + sessionID.length + blobEnd);
-            writeUInt32BE(blob, sessionID.length, 0);
-            blob.set(sessionID, 4);
-            blob.set(payload.subarray(0, blobEnd), 4 + sessionID.length);
-            methodData = {
-              keyAlgo: realKeyAlgo,
-              key,
-              signature: convertedSig,
-              blob,
-              localHostname,
-              localUsername,
-              hashAlgo,
-            };
-          }
+          const sessionID = self._kex.sessionID;
+          const blob = allocBytes(4 + sessionID.length + blobEnd);
+          writeUInt32BE(blob, sessionID.length, 0);
+          blob.set(sessionID, 4);
+          blob.set(payload.subarray(0, blobEnd), 4 + sessionID.length);
+          methodData = {
+            // Pass the SSH-format signature through unchanged; ParsedKey.verify()
+            // performs the per-algorithm conversion (ECDSA mpints -> P1363).
+            keyAlgo: realKeyAlgo,
+            key,
+            signature,
+            blob,
+            localHostname,
+            localUsername,
+            hashAlgo,
+          };
         }
         break;
       }

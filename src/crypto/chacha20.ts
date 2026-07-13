@@ -212,6 +212,9 @@ export class ChaChaPolyDecipher implements Decipher {
       const decryptedPayload = chacha20(this._decKeyMain, nonce, this._packet!, undefined, 1);
 
       const padLen = decryptedPayload[0];
+      if (padLen > decryptedPayload.length - 1) {
+        throw new Error('Invalid padding length');
+      }
       const payload = decryptedPayload.subarray(1, decryptedPayload.length - padLen);
 
       // Prepare for next packet

@@ -15,7 +15,14 @@ import {
   NullDecipher as CipherNullDecipher,
 } from '../crypto/ciphers.ts';
 import { Ber, BerWriter } from '../utils/ber.ts';
-import { allocBytes, concatBytes, fromString, toUtf8, writeUInt32BE } from '../utils/binary.ts';
+import {
+  allocBytes,
+  concatBytes,
+  fromString,
+  readUInt32BE,
+  toUtf8,
+  writeUInt32BE,
+} from '../utils/binary.ts';
 import { EventEmitter } from '../utils/events.ts';
 import { CIPHER_INFO, COMPAT_CHECKS, DISCONNECT_REASON, MAC_INFO, MESSAGE } from './constants.ts';
 import { type HandlerProtocol, MESSAGE_HANDLERS, type ProtocolHandlers } from './handlers.ts';
@@ -156,6 +163,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   private _kexinit: Uint8Array | undefined;
   _kex: { sessionID: Uint8Array } = { sessionID: new Uint8Array(0) };
   private _strictKex = false; // RFC 9700 strict KEX mode
+  private _firstKexComplete = false; // set once the first NEWKEYS is processed
   private _kexInitPromise: Promise<void> | undefined; // Promise for key exchange initialization
 
   // Encryption
@@ -540,6 +548,22 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       return;
     }
 
+    // Strict KEX (RFC 9700 / Terrapin, CVE-2023-48795): during the initial key
+    // exchange (before the first NEWKEYS) only KEX messages (20-49) are allowed.
+    // Any other transport message here (IGNORE/DEBUG/UNIMPLEMENTED/EXT_INFO/...)
+    // is an injection attempt and must abort the connection. Combined with the
+    // post-NEWKEYS sequence-number reset, this closes the Terrapin attack.
+    if (this._strictKex && !this._firstKexComplete) {
+      this._debug?.(`Strict KEX violation: message type ${type} before first NEWKEYS`);
+      this.disconnect(DISCONNECT_REASON.KEY_EXCHANGE_FAILED);
+      this._onError?.(
+        new Error(
+          `Strict KEX violation: unexpected message type ${type} during initial key exchange`,
+        ),
+      );
+      return;
+    }
+
     // Look up message handler
     const handler = MESSAGE_HANDLERS[type];
     if (handler) {
@@ -614,6 +638,10 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
 
     // Switch decipher for receiving
     this._switchInboundDecipher();
+
+    // The initial key exchange is now complete; strict-KEX message filtering
+    // (see _handlePacket) only applies up to this first NEWKEYS.
+    this._firstKexComplete = true;
 
     // Key exchange is complete
     this._kexinit = undefined;
@@ -690,8 +718,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       return;
     }
 
-    const clientPubKeyLen = (payload[1] << 24) | (payload[2] << 16) | (payload[3] << 8) |
-      payload[4];
+    const clientPubKeyLen = readUInt32BE(payload, 1);
     if (payload.length < 5 + clientPubKeyLen) {
       this._onError?.(new Error('Invalid KEXECDH_INIT: truncated public key'));
       return;
@@ -808,8 +835,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     }
 
     // K_S (host key)
-    const hostKeyLen = (payload[offset] << 24) | (payload[offset + 1] << 16) |
-      (payload[offset + 2] << 8) | payload[offset + 3];
+    const hostKeyLen = readUInt32BE(payload, offset);
     offset += 4;
     if (payload.length < offset + hostKeyLen) {
       this._onError?.(new Error('Invalid KEXECDH_REPLY: truncated host key'));
@@ -823,8 +849,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       this._onError?.(new Error('Invalid KEXECDH_REPLY: truncated'));
       return;
     }
-    const serverPubKeyLen = (payload[offset] << 24) | (payload[offset + 1] << 16) |
-      (payload[offset + 2] << 8) | payload[offset + 3];
+    const serverPubKeyLen = readUInt32BE(payload, offset);
     offset += 4;
     if (payload.length < offset + serverPubKeyLen) {
       this._onError?.(new Error('Invalid KEXECDH_REPLY: truncated server public key'));
@@ -838,8 +863,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       this._onError?.(new Error('Invalid KEXECDH_REPLY: truncated'));
       return;
     }
-    const sigLen = (payload[offset] << 24) | (payload[offset + 1] << 16) |
-      (payload[offset + 2] << 8) | payload[offset + 3];
+    const sigLen = readUInt32BE(payload, offset);
     offset += 4;
     if (payload.length < offset + sigLen) {
       this._onError?.(new Error('Invalid KEXECDH_REPLY: truncated signature'));
@@ -865,7 +889,13 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
 
     // Verify signature
     const exchangeHash = this._kexHandler.state.exchangeHash!;
-    const verified = await this._verifyExchangeHash(hostKey, exchangeHash, signature);
+    const negotiatedAlgo = this._kexHandler.state.algorithms?.serverHostKey;
+    const verified = await this._verifyExchangeHash(
+      hostKey,
+      exchangeHash,
+      signature,
+      negotiatedAlgo,
+    );
     if (verified instanceof Error) {
       this._onError?.(verified);
       return;
@@ -1078,6 +1108,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     hostKey: Uint8Array,
     exchangeHash: Uint8Array,
     signature: Uint8Array,
+    negotiatedAlgo?: string,
   ): Promise<boolean | Error> {
     try {
       // Parse host key to get type and public key data
@@ -1087,37 +1118,41 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       }
 
       let offset = 0;
-      const typeLen = (hostKey[offset] << 24) | (hostKey[offset + 1] << 16) |
-        (hostKey[offset + 2] << 8) | hostKey[offset + 3];
+      const typeLen = readUInt32BE(hostKey, offset);
       offset += 4;
       const keyType = new TextDecoder().decode(hostKey.subarray(offset, offset + typeLen));
       offset += typeLen;
 
       // Parse signature: string algo + string sig
       let sigOffset = 0;
-      const algoLen = (signature[sigOffset] << 24) | (signature[sigOffset + 1] << 16) |
-        (signature[sigOffset + 2] << 8) | signature[sigOffset + 3];
+      const algoLen = readUInt32BE(signature, sigOffset);
       sigOffset += 4;
       const sigAlgo = new TextDecoder().decode(signature.subarray(sigOffset, sigOffset + algoLen));
       sigOffset += algoLen;
 
-      const rawSigLen = (signature[sigOffset] << 24) | (signature[sigOffset + 1] << 16) |
-        (signature[sigOffset + 2] << 8) | signature[sigOffset + 3];
+      const rawSigLen = readUInt32BE(signature, sigOffset);
       sigOffset += 4;
       const rawSig = signature.subarray(sigOffset, sigOffset + rawSigLen);
 
       this._debug?.(`Verifying signature with algo: ${sigAlgo}, key type: ${keyType}`);
 
+      // Bind the signature algorithm to what was negotiated in KEXINIT. Without
+      // this a MITM could present, e.g., an ssh-rsa (SHA-1) signature when
+      // rsa-sha2-512 was negotiated, silently downgrading the hash.
+      if (negotiatedAlgo && sigAlgo !== negotiatedAlgo) {
+        return new Error(
+          `Host key signature algorithm mismatch: negotiated '${negotiatedAlgo}', got '${sigAlgo}'`,
+        );
+      }
+
       if (keyType === 'ssh-rsa' || sigAlgo.startsWith('rsa-sha2')) {
         // Extract RSA public key components (e, n) from host key
-        const eLen = (hostKey[offset] << 24) | (hostKey[offset + 1] << 16) |
-          (hostKey[offset + 2] << 8) | hostKey[offset + 3];
+        const eLen = readUInt32BE(hostKey, offset);
         offset += 4;
         let e = hostKey.subarray(offset, offset + eLen);
         offset += eLen;
 
-        const nLen = (hostKey[offset] << 24) | (hostKey[offset + 1] << 16) |
-          (hostKey[offset + 2] << 8) | hostKey[offset + 3];
+        const nLen = readUInt32BE(hostKey, offset);
         offset += 4;
         let n = hostKey.subarray(offset, offset + nLen);
 
@@ -1165,8 +1200,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
         );
       } else if (keyType === 'ssh-ed25519' || sigAlgo === 'ssh-ed25519') {
         // Extract Ed25519 public key (32 bytes) from host key
-        const pubLen = (hostKey[offset] << 24) | (hostKey[offset + 1] << 16) |
-          (hostKey[offset + 2] << 8) | hostKey[offset + 3];
+        const pubLen = readUInt32BE(hostKey, offset);
         offset += 4;
         const rawPub = hostKey.subarray(offset, offset + pubLen);
 
@@ -1213,14 +1247,12 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       } else if (keyType.startsWith('ecdsa-sha2-')) {
         // Extract ECDSA public key from host key
         // Format: string curve_name + string Q (public point)
-        const curveNameLen = (hostKey[offset] << 24) | (hostKey[offset + 1] << 16) |
-          (hostKey[offset + 2] << 8) | hostKey[offset + 3];
+        const curveNameLen = readUInt32BE(hostKey, offset);
         offset += 4;
         const curveName = new TextDecoder().decode(hostKey.subarray(offset, offset + curveNameLen));
         offset += curveNameLen;
 
-        const qLen = (hostKey[offset] << 24) | (hostKey[offset + 1] << 16) |
-          (hostKey[offset + 2] << 8) | hostKey[offset + 3];
+        const qLen = readUInt32BE(hostKey, offset);
         offset += 4;
         const q = hostKey.subarray(offset, offset + qLen);
 
@@ -1357,8 +1389,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     let offset = 0;
 
     // Read r length
-    const rLen = (sig[offset] << 24) | (sig[offset + 1] << 16) |
-      (sig[offset + 2] << 8) | sig[offset + 3];
+    const rLen = readUInt32BE(sig, offset);
     offset += 4;
 
     if (sig.length < offset + rLen + 4) {
@@ -1369,8 +1400,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     offset += rLen;
 
     // Read s length
-    const sLen = (sig[offset] << 24) | (sig[offset + 1] << 16) |
-      (sig[offset + 2] << 8) | sig[offset + 3];
+    const sLen = readUInt32BE(sig, offset);
     offset += 4;
 
     if (sig.length < offset + sLen) {

@@ -27,10 +27,12 @@ export function randomFill(buffer: Uint8Array, offset: number = 0, size?: number
 }
 
 /**
- * Generate a random unsigned 32-bit integer.
+ * Generate a random unsigned 32-bit integer in the range [0, 2^32).
  */
 export function randomUInt32(): number {
   const bytes = new Uint8Array(4);
   crypto.getRandomValues(bytes);
-  return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+  // `>>> 0` coerces the result of the sign-extending bitwise ops back to an
+  // unsigned 32-bit integer; without it values with the high bit set are negative.
+  return ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0;
 }

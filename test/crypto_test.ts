@@ -422,8 +422,11 @@ Deno.test('xorBytes throws when arrays have different lengths', () => {
 // =============================================================================
 
 Deno.test('randomUInt32 returns a number in uint32 range', () => {
-  const val = randomUInt32();
-  assertEquals(typeof val, 'number');
-  // May be negative due to signed interpretation of bit ops, but within 32-bit range
-  assertEquals(Number.isInteger(val), true);
+  for (let i = 0; i < 50; i++) {
+    const val = randomUInt32();
+    assertEquals(typeof val, 'number');
+    assertEquals(Number.isInteger(val), true);
+    // Must be an unsigned 32-bit value: [0, 2^32).
+    assertEquals(val >= 0 && val <= 0xffffffff, true);
+  }
 });
