@@ -1,21 +1,45 @@
 /**
  * ChaCha20-Poly1305 Cipher implementation for SSH
  *
- * Uses @noble/ciphers for the underlying ChaCha20 and Poly1305 implementations.
  * SSH's chacha20-poly1305@openssh.com uses a custom construction different from
- * standard AEAD ChaCha20-Poly1305 (RFC 8439).
+ * standard AEAD ChaCha20-Poly1305 (RFC 8439): the original DJB ChaCha20 variant
+ * (8-byte nonce, explicit block counter) plus a detached Poly1305 MAC.
+ *
+ * ChaCha20 uses the runtime's native node:crypto cipher (requires a Deno
+ * version whose node:crypto supports the raw "chacha20" cipher); Poly1305 is
+ * vendored in poly1305.ts since no runtime exposes it standalone.
  */
 
-// Use chacha20orig (DJB format with 8-byte nonce) not chacha20 (IETF format with 12-byte nonce)
-// OpenSSH uses DJB ChaCha20 format
-import { poly1305 } from '@noble/ciphers/_poly1305';
-import { chacha20orig as chacha20 } from '@noble/ciphers/chacha';
+import { createCipheriv } from 'node:crypto';
 import { allocBytes, readUInt32BE, writeUInt32BE } from '../utils/binary.ts';
 import type { Cipher, CipherConfig, Decipher, DecipherConfig } from './ciphers.ts';
+import { poly1305 } from './poly1305.ts';
 import { randomFill } from './random.ts';
 import { timingSafeEqual } from './utils.ts';
 
 const MAX_PACKET_SIZE = 35000;
+
+/**
+ * DJB-variant ChaCha20 (8-byte nonce, 64-bit counter) as used by OpenSSH.
+ *
+ * The native cipher uses the OpenSSL IV layout: 32-bit little-endian counter
+ * followed by a 96-bit nonce. A DJB counter below 2^32 maps onto it as
+ * counter(4 LE) || 0x00000000 || nonce(8) — SSH only uses counters 0 and 1.
+ */
+export function chacha20(
+  key: Uint8Array,
+  nonce: Uint8Array,
+  data: Uint8Array,
+  counter: number = 0,
+): Uint8Array {
+  const iv = new Uint8Array(16);
+  iv[0] = counter & 0xff;
+  iv[1] = (counter >>> 8) & 0xff;
+  iv[2] = (counter >>> 16) & 0xff;
+  iv[3] = (counter >>> 24) & 0xff;
+  iv.set(nonce, 8);
+  return new Uint8Array(createCipheriv('chacha20', key, iv).update(data));
+}
 
 /**
  * ChaCha20-Poly1305 Cipher for SSH
@@ -82,11 +106,11 @@ export class ChaChaPolyCipher implements Cipher {
     // Encrypt payload with main key, counter=1
     // ChaCha20 counter starts at 1 for payload encryption
     const payload = packet.subarray(4);
-    const encryptedPayload = chacha20(this._encKeyMain, nonce, payload, undefined, 1);
+    const encryptedPayload = chacha20(this._encKeyMain, nonce, payload, 1);
     this._onWrite(encryptedPayload);
 
     // Calculate Poly1305 MAC over encrypted length + encrypted payload
-    // Note: poly1305 from @noble/ciphers takes (message, key) not (key, message)
+    // Note: poly1305 takes (message, key) not (key, message)
     const macData = allocBytes(encryptedLen.length + encryptedPayload.length);
     macData.set(encryptedLen, 0);
     macData.set(encryptedPayload, encryptedLen.length);
@@ -198,7 +222,7 @@ export class ChaChaPolyDecipher implements Decipher {
       const polyKey = chacha20(this._decKeyMain, nonce, zeros32);
 
       // Verify MAC
-      // Note: poly1305 from @noble/ciphers takes (message, key) not (key, message)
+      // Note: poly1305 takes (message, key) not (key, message)
       const macData = allocBytes(4 + this._packet!.length);
       macData.set(this._lenBuf, 0);
       macData.set(this._packet!, 4);
@@ -209,7 +233,7 @@ export class ChaChaPolyDecipher implements Decipher {
       }
 
       // Decrypt payload with counter=1
-      const decryptedPayload = chacha20(this._decKeyMain, nonce, this._packet!, undefined, 1);
+      const decryptedPayload = chacha20(this._decKeyMain, nonce, this._packet!, 1);
 
       const padLen = decryptedPayload[0];
       if (padLen > decryptedPayload.length - 1) {
