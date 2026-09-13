@@ -174,6 +174,13 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   // Async parsing state - ensures only one parse operation runs at a time
   private _parsingPromise: Promise<void> | undefined;
 
+  // Packet construction can await compression and encryption. Keep one
+  // protocol-level queue so channel fragments reach the transport in call
+  // order even when callers use the synchronous message API concurrently.
+  private _outboundPackets: Uint8Array[] = [];
+  private _sendingPacket = false;
+  private _packetDrainPromise: Promise<void> = Promise.resolve();
+
   // Packet read/write
   private _packetRW: {
     read: PacketReader;
@@ -767,7 +774,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     }
 
     // Send NEWKEYS
-    this._sendNewKeys();
+    await this._sendNewKeys();
 
     // Store session keys for cipher switching
     this._sessionKeys = sessionKeys;
@@ -911,7 +918,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     }
 
     // Send NEWKEYS
-    this._sendNewKeys();
+    await this._sendNewKeys();
 
     // Store session keys for cipher switching
     this._sessionKeys = sessionKeys;
@@ -1430,13 +1437,14 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   /**
    * Send NEWKEYS message
    */
-  private _sendNewKeys(): void {
+  private async _sendNewKeys(): Promise<void> {
     const payload = allocBytes(1);
     payload[0] = MESSAGE.NEWKEYS;
 
     this._debug?.('Outbound: Sending NEWKEYS');
     // Force send - key exchange packets must never be queued during rekey
     this._sendPacket(payload, true);
+    await this._waitForOutboundPackets();
   }
 
   /**
@@ -1588,22 +1596,52 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   /**
    * Send a packet
    */
-  private async _sendPacket(payload: Uint8Array, force = false): Promise<void> {
+  private _sendPacket(payload: Uint8Array, force = false): void {
     // During rekey, queue non-critical packets
     if (this._queue && !force) {
       this._queue.push(payload);
       return;
     }
 
-    // Compress if enabled
-    let data = payload;
-    if (this._compress && this._compressor) {
-      data = await this._compressor.compressAsync(payload);
+    this._outboundPackets.push(payload);
+    if (!this._sendingPacket) {
+      this._packetDrainPromise = this._drainOutboundPackets();
     }
+  }
 
-    const packet = this._cipher.allocPacket(data.length);
-    packet.set(data, 5);
-    await this._cipher.encrypt(packet);
+  private async _drainOutboundPackets(): Promise<void> {
+    if (this._sendingPacket) return;
+    this._sendingPacket = true;
+
+    try {
+      while (this._outboundPackets.length > 0) {
+        const payload = this._outboundPackets.shift()!;
+
+        // Compress if enabled
+        let data = payload;
+        if (this._compress && this._compressor) {
+          data = await this._compressor.compressAsync(payload);
+        }
+
+        const packet = this._cipher.allocPacket(data.length);
+        packet.set(data, 5);
+        await this._cipher.encrypt(packet);
+      }
+    } catch (err) {
+      this._outboundPackets.length = 0;
+      this._onError?.(err as Error);
+    } finally {
+      this._sendingPacket = false;
+      if (this._outboundPackets.length > 0) {
+        this._packetDrainPromise = this._drainOutboundPackets();
+      }
+    }
+  }
+
+  private async _waitForOutboundPackets(): Promise<void> {
+    while (this._sendingPacket || this._outboundPackets.length > 0) {
+      await this._packetDrainPromise;
+    }
   }
 
   /**
