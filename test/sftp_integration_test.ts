@@ -7,6 +7,7 @@
 
 import { assertEquals, assertExists, assertRejects, assertThrows } from '@std/assert';
 
+import { Channel, type ChannelInfo } from '../src/Channel.ts';
 import {
   type FileAttributes,
   OPEN_MODE,
@@ -1332,6 +1333,72 @@ Deno.test('SFTP: constructor without cfg uses defaults', () => {
   // Call without third argument (cfg is undefined) → covers `const config = cfg || {}`
   const sftp = new SFTP({ protocol }, chanInfo);
   assertEquals(sftp.server, false);
+});
+
+Deno.test('SFTP: channel window adjustment drains buffered packets in order', () => {
+  const sent: Uint8Array[] = [];
+  const outgoing: ChannelInfo['outgoing'] = {
+    id: 0,
+    window: 10,
+    packetSize: 8,
+    state: 'open',
+  };
+  const chanInfo: ChannelInfo = {
+    type: 'session',
+    incoming: { id: 1, window: 2 * 1024 * 1024, packetSize: 32768, state: 'open' },
+    outgoing,
+  };
+  const protocol = {
+    channelData: (_id: number, data: Uint8Array) => sent.push(new Uint8Array(data)),
+    channelExtData: () => {},
+    channelEOF: () => {},
+    channelClose: () => {},
+    channelWindowAdjust: () => {},
+  };
+  const channel = new Channel({ _protocol: protocol }, chanInfo, { server: true });
+  const sftp = new SFTP({ protocol }, chanInfo, { server: true });
+
+  sftp.handle(1, new Uint8Array([0xaa]));
+  sftp.handle(2, new Uint8Array([0xbb]));
+  assertEquals(outgoing.window, 0);
+
+  channel.adjustWindow(18);
+
+  const actual = Uint8Array.from(sent.flatMap((chunk) => [...chunk]));
+  assertEquals(
+    actual,
+    new Uint8Array([
+      0,
+      0,
+      0,
+      10,
+      102,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      0xaa,
+      0,
+      0,
+      0,
+      10,
+      102,
+      0,
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      1,
+      0xbb,
+    ]),
+  );
+  assertEquals(outgoing.window, 0);
 });
 
 Deno.test('SFTP: constructor with remoteIdentRaw matching OpenSSH sets _isOpenSSH', () => {

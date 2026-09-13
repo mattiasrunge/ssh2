@@ -7,6 +7,7 @@
 
 import { allocBytes, fromString, writeUInt32BE } from '../../utils/binary.ts';
 import { EventEmitter } from '../../utils/events.ts';
+import { onWindowAdjust } from '../../channel-window.ts';
 import {
   DEFAULT_MAX_PKT_LEN,
   MAX_REQID,
@@ -137,6 +138,7 @@ export class SFTP extends EventEmitter {
   // @ts-ignore Used for flow control
   private _chunkcb?: () => void;
   private _buffer: Uint8Array[] = [];
+  private _removeWindowAdjustListener?: () => void;
 
   // Parser instance
   private _parser: PacketParser;
@@ -166,6 +168,12 @@ export class SFTP extends EventEmitter {
     this.type = chanInfo.type;
     this.incoming = chanInfo.incoming;
     this.outgoing = chanInfo.outgoing;
+    this._removeWindowAdjustListener = onWindowAdjust(this.outgoing, () => {
+      if (this._waitWindow && this.outgoing.window > 0) {
+        this._waitWindow = false;
+        this._drainBuffer();
+      }
+    });
   }
 
   /**
@@ -290,6 +298,8 @@ export class SFTP extends EventEmitter {
    * Destroy the SFTP session
    */
   destroy(): void {
+    this._removeWindowAdjustListener?.();
+    this._removeWindowAdjustListener = undefined;
     if (this.outgoing.state === 'open' || this.outgoing.state === 'eof') {
       this.outgoing.state = 'closing';
       this._protocol.channelClose(this.outgoing.id!);

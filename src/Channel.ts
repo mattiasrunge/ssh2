@@ -6,6 +6,7 @@
  */
 
 import { CHANNEL_EXTENDED_DATATYPE } from './protocol/constants.ts';
+import { notifyWindowAdjust } from './channel-window.ts';
 import { EventEmitter } from './utils/events.ts';
 
 const STDERR = CHANNEL_EXTENDED_DATATYPE.STDERR;
@@ -502,6 +503,8 @@ export class Channel extends EventEmitter<ChannelEvents> {
 
       this.emit('drain');
     }
+
+    notifyWindowAdjust(this.outgoing);
   }
 
   /**
