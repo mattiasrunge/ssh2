@@ -181,12 +181,13 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   // Async parsing state - ensures only one parse operation runs at a time
   private _parsingPromise: Promise<void> | undefined;
 
-  // Packet construction can await compression and encryption. Keep one
-  // protocol-level queue so channel fragments reach the transport in call
-  // order even when callers use the synchronous message API concurrently.
+  // Compression is stateful and stays serialized here. Ciphers reserve their
+  // own sequence/IV and ordered transport slots synchronously, so independent
+  // async encryptions can remain in flight without reordering their writes.
   private _outboundPackets: OutboundPayload[] = [];
   private _sendingPacket = false;
   private _packetDrainPromise: Promise<void> = Promise.resolve();
+  private _pendingEncryptions = new Set<Promise<void>>();
 
   // Packet read/write
   private _packetRW: {
@@ -1610,9 +1611,40 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       return;
     }
 
+    if (!this._compress || !this._compressor) {
+      this._encryptPacket(payload);
+      return;
+    }
+
     this._outboundPackets.push(payload);
     if (!this._sendingPacket) {
       this._packetDrainPromise = this._drainOutboundPackets();
+    }
+  }
+
+  private _encryptPacket(payload: OutboundPayload): void {
+    try {
+      const packet = this._cipher.allocPacket(payload.length);
+      if (payload instanceof Uint8Array) {
+        packet.set(payload, 5);
+      } else {
+        let packetOffset = 5;
+        for (const part of payload.parts) {
+          packet.set(part, packetOffset);
+          packetOffset += part.length;
+        }
+      }
+
+      const encrypted = this._cipher.encrypt(packet);
+      if (!encrypted) return;
+
+      let tracked: Promise<void>;
+      tracked = encrypted
+        .catch((err) => this._onError?.(err as Error))
+        .finally(() => this._pendingEncryptions.delete(tracked));
+      this._pendingEncryptions.add(tracked);
+    } catch (err) {
+      this._onError?.(err as Error);
     }
   }
 
@@ -1623,34 +1655,16 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     try {
       for (let i = 0; i < this._outboundPackets.length; i++) {
         const payload = this._outboundPackets[i];
-
-        // Compress if enabled
-        let data = payload instanceof Uint8Array ? payload : undefined;
-        if (this._compress && this._compressor) {
-          if (!data) {
-            const segmented = payload as SegmentedPayload;
-            data = allocBytes(segmented.length);
-            let offset = 0;
-            for (const part of segmented.parts) {
-              data.set(part, offset);
-              offset += part.length;
-            }
-          }
-          data = await this._compressor.compressAsync(data);
-        }
-
-        const packet = this._cipher.allocPacket(data?.length ?? payload.length);
-        if (payload instanceof Uint8Array || this._compress) {
-          packet.set(data!, 5);
-        } else {
-          let offset = 5;
+        let data = payload instanceof Uint8Array ? payload : allocBytes(payload.length);
+        if (!(payload instanceof Uint8Array)) {
+          let dataOffset = 0;
           for (const part of payload.parts) {
-            packet.set(part, offset);
-            offset += part.length;
+            data.set(part, dataOffset);
+            dataOffset += part.length;
           }
         }
-        const encrypted = this._cipher.encrypt(packet);
-        if (encrypted) await encrypted;
+        data = await this._compressor!.compressAsync(data);
+        this._encryptPacket(data);
       }
       this._outboundPackets.length = 0;
     } catch (err) {
@@ -1665,8 +1679,10 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   }
 
   private async _waitForOutboundPackets(): Promise<void> {
-    while (this._sendingPacket || this._outboundPackets.length > 0) {
-      await this._packetDrainPromise;
+    while (
+      this._sendingPacket || this._outboundPackets.length > 0 || this._pendingEncryptions.size > 0
+    ) {
+      await Promise.all([this._packetDrainPromise, ...this._pendingEncryptions]);
     }
   }
 

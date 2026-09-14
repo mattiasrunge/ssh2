@@ -51,6 +51,7 @@ export interface Cipher {
   outSeqno: number;
   free(): void;
   allocPacket(payloadLen: number): Uint8Array;
+  /** Reserve sequence/IV state and transport write order before the first await. */
   encrypt(packet: Uint8Array): void | Promise<void>;
 }
 
