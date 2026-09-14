@@ -1638,8 +1638,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
       const encrypted = this._cipher.encrypt(packet);
       if (!encrypted) return;
 
-      let tracked: Promise<void>;
-      tracked = encrypted
+      const tracked = encrypted
         .catch((err) => this._onError?.(err as Error))
         .finally(() => this._pendingEncryptions.delete(tracked));
       this._pendingEncryptions.add(tracked);
