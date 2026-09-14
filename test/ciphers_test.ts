@@ -62,6 +62,42 @@ Deno.test('NullCipher and NullDecipher round-trip', async () => {
   decipher.free();
 });
 
+Deno.test('ChaCha20-Poly1305 emits one complete record synchronously', async () => {
+  const cipherInfo = CIPHER_INFO['chacha20-poly1305@openssh.com'];
+  const key = randomBytes(cipherInfo.keyLen);
+  const writes: Uint8Array[] = [];
+  const payloads: Uint8Array[] = [];
+  const cipher = createCipher({
+    outbound: {
+      seqno: 0,
+      onWrite: (data) => writes.push(data),
+      cipherInfo,
+      cipherKey: key,
+      cipherIV: new Uint8Array(0),
+    },
+  });
+  const decipher = createDecipher({
+    inbound: {
+      seqno: 0,
+      onPayload: (payload) => payloads.push(new Uint8Array(payload)),
+      decipherInfo: cipherInfo,
+      decipherKey: key,
+      decipherIV: new Uint8Array(0),
+    },
+  });
+  const payload = randomBytes(1024);
+  const packet = cipher.allocPacket(payload.length);
+  packet.set(payload, 5);
+
+  const result = cipher.encrypt(packet);
+
+  assertEquals(result, undefined);
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].length, packet.length + 16);
+  await decipher.decrypt(writes[0], 0, writes[0].length);
+  assertEquals(payloads, [payload]);
+});
+
 // Test AES-GCM cipher
 Deno.test('AES-128-GCM cipher encrypts and decrypts correctly', async () => {
   const cipherInfo = CIPHER_INFO['aes128-gcm@openssh.com'];

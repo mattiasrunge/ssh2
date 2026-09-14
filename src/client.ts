@@ -807,10 +807,11 @@ export class Client extends EventEmitter<ClientEvents> {
     try {
       writer = this._transport.writable.getWriter();
 
-      while (this._writeQueue.length > 0) {
-        const data = this._writeQueue.shift()!;
+      for (let i = 0; i < this._writeQueue.length; i++) {
+        const data = this._writeQueue[i];
         await writer.write(data);
       }
+      this._writeQueue.length = 0;
     } catch (err) {
       // Clear the queue to prevent infinite recursion when transport is closed
       this._writeQueue.length = 0;

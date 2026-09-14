@@ -5,7 +5,7 @@
  * Supports both client and server modes.
  */
 
-import { allocBytes, fromString, writeUInt32BE } from '../../utils/binary.ts';
+import { allocBytes, concatBytes, fromString, writeUInt32BE } from '../../utils/binary.ts';
 import { EventEmitter } from '../../utils/events.ts';
 import { onWindowAdjust } from '../../channel-window.ts';
 import {
@@ -73,7 +73,41 @@ interface ChannelInfo {
  */
 export interface SFTPProtocol {
   channelData(id: number, data: Uint8Array): void;
+  channelDataParts?(id: number, parts: readonly Uint8Array[]): void;
   channelClose(id: number): void;
+}
+
+type OutboundPayload = {
+  length: number;
+  offset: number;
+  parts: readonly Uint8Array[];
+};
+
+function payloadParts(
+  payload: OutboundPayload,
+  start: number,
+  length: number,
+): Uint8Array[] {
+  const result: Uint8Array[] = [];
+  let partStart = 0;
+  let remaining = length;
+
+  for (const part of payload.parts) {
+    const partEnd = partStart + part.length;
+    if (start < partEnd && remaining > 0) {
+      const offset = Math.max(0, start - partStart);
+      const take = Math.min(part.length - offset, remaining);
+      result.push(
+        offset === 0 && take === part.length ? part : part.subarray(offset, offset + take),
+      );
+      start += take;
+      remaining -= take;
+    }
+    partStart = partEnd;
+    if (remaining === 0) break;
+  }
+
+  return result;
 }
 
 /**
@@ -137,7 +171,7 @@ export class SFTP extends EventEmitter {
   private _waitWindow = false;
   // @ts-ignore Used for flow control
   private _chunkcb?: () => void;
-  private _buffer: Uint8Array[] = [];
+  private _buffer: OutboundPayload[] = [];
   private _removeWindowAdjustListener?: () => void;
 
   // Parser instance
@@ -1099,19 +1133,17 @@ export class SFTP extends EventEmitter {
   data(reqId: number, data: Uint8Array): void {
     this._checkServer();
 
-    const buf = allocBytes(4 + 1 + 4 + 4 + data.length);
+    const header = allocBytes(4 + 1 + 4 + 4);
     let p = 0;
 
-    writeUInt32BE(buf, buf.length - 4, p);
+    writeUInt32BE(header, header.length + data.length - 4, p);
     p += 4;
-    buf[p++] = RESPONSE.DATA;
-    writeUInt32BE(buf, reqId, p);
+    header[p++] = RESPONSE.DATA;
+    writeUInt32BE(header, reqId, p);
     p += 4;
-    writeUInt32BE(buf, data.length, p);
-    p += 4;
-    buf.set(data, p);
+    writeUInt32BE(header, data.length, p);
 
-    this._sendOrBuffer(buf);
+    this._sendOrBuffer([header, data]);
   }
 
   /**
@@ -1315,7 +1347,13 @@ export class SFTP extends EventEmitter {
     this._debug?.(`SFTP: Outbound: Sending ${name}`);
   }
 
-  private _sendOrBuffer(payload: Uint8Array): boolean {
+  private _sendOrBuffer(data: Uint8Array | readonly Uint8Array[]): boolean {
+    const parts = data instanceof Uint8Array ? [data] : data;
+    const payload: OutboundPayload = {
+      length: parts.reduce((total, part) => total + part.length, 0),
+      offset: 0,
+      parts,
+    };
     const ret = this._tryWritePayload(payload);
     if (ret !== undefined) {
       this._buffer.push(ret);
@@ -1324,7 +1362,7 @@ export class SFTP extends EventEmitter {
     return true;
   }
 
-  private _tryWritePayload(payload: Uint8Array): Uint8Array | undefined {
+  private _tryWritePayload(payload: OutboundPayload): OutboundPayload | undefined {
     if (this.outgoing.state !== 'open') return undefined;
 
     if (this.outgoing.window === 0) {
@@ -1333,12 +1371,15 @@ export class SFTP extends EventEmitter {
       return payload;
     }
 
-    let ret: Uint8Array | undefined;
-    const len = payload.length;
-    let p = 0;
+    let ret: OutboundPayload | undefined;
+    let p = payload.offset;
 
-    while (len - p > 0 && this.outgoing.window > 0) {
-      const actualLen = Math.min(len - p, this.outgoing.window, this.outgoing.packetSize);
+    while (payload.length - p > 0 && this.outgoing.window > 0) {
+      const actualLen = Math.min(
+        payload.length - p,
+        this.outgoing.window,
+        this.outgoing.packetSize,
+      );
       this.outgoing.window -= actualLen;
 
       if (this.outgoing.window === 0) {
@@ -1346,17 +1387,20 @@ export class SFTP extends EventEmitter {
         this._chunkcb = this._drainBuffer.bind(this);
       }
 
-      if (p === 0 && actualLen === len) {
-        this._protocol.channelData(this.outgoing.id!, payload);
+      const parts = payloadParts(payload, p, actualLen);
+      if (this._protocol.channelDataParts) {
+        this._protocol.channelDataParts(this.outgoing.id!, parts);
+      } else if (parts.length === 1) {
+        this._protocol.channelData(this.outgoing.id!, parts[0]);
       } else {
-        this._protocol.channelData(this.outgoing.id!, payload.subarray(p, p + actualLen));
+        this._protocol.channelData(this.outgoing.id!, concatBytes(parts));
       }
 
       p += actualLen;
     }
 
-    if (len - p > 0) {
-      ret = p > 0 ? payload.subarray(p, len) : payload;
+    if (payload.length - p > 0) {
+      ret = p === payload.offset ? payload : { ...payload, offset: p };
     }
 
     return ret;

@@ -85,7 +85,7 @@ export class ChaChaPolyCipher implements Cipher {
     return packet;
   }
 
-  async encrypt(packet: Uint8Array): Promise<void> {
+  encrypt(packet: Uint8Array): void {
     if (this._dead) return;
 
     // Build 8-byte nonce: 64-bit sequence number in big-endian (DJB format)
@@ -101,21 +101,19 @@ export class ChaChaPolyCipher implements Cipher {
     // Encrypt packet length (4 bytes) with length key
     const lenBytes = packet.subarray(0, 4);
     const encryptedLen = chacha20(this._encKeyPktLen, nonce, lenBytes);
-    this._onWrite(encryptedLen);
-
     // Encrypt payload with main key, counter=1
     // ChaCha20 counter starts at 1 for payload encryption
     const payload = packet.subarray(4);
     const encryptedPayload = chacha20(this._encKeyMain, nonce, payload, 1);
-    this._onWrite(encryptedPayload);
-
     // Calculate Poly1305 MAC over encrypted length + encrypted payload
     // Note: poly1305 takes (message, key) not (key, message)
-    const macData = allocBytes(encryptedLen.length + encryptedPayload.length);
-    macData.set(encryptedLen, 0);
-    macData.set(encryptedPayload, encryptedLen.length);
-    const mac = poly1305(macData, polyKey);
-    this._onWrite(mac);
+    const macOffset = encryptedLen.length + encryptedPayload.length;
+    const record = allocBytes(macOffset + 16);
+    record.set(encryptedLen, 0);
+    record.set(encryptedPayload, encryptedLen.length);
+    const mac = poly1305(record.subarray(0, macOffset), polyKey);
+    record.set(mac, macOffset);
+    this._onWrite(record);
 
     this.outSeqno = (this.outSeqno + 1) >>> 0;
   }

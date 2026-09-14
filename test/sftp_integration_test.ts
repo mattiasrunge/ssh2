@@ -5,7 +5,13 @@
  * Converted from test/test-sftp.js
  */
 
-import { assertEquals, assertExists, assertRejects, assertThrows } from '@std/assert';
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertStrictEquals,
+  assertThrows,
+} from '@std/assert';
 
 import { Channel, type ChannelInfo } from '../src/Channel.ts';
 import {
@@ -1399,6 +1405,32 @@ Deno.test('SFTP: channel window adjustment drains buffered packets in order', ()
     ]),
   );
   assertEquals(outgoing.window, 0);
+});
+
+Deno.test('SFTP: DATA keeps file bytes segmented through channel framing', () => {
+  const sent: Array<readonly Uint8Array[]> = [];
+  const protocol = {
+    channelData: () => {},
+    channelDataParts: (_id: number, parts: readonly Uint8Array[]) => sent.push(parts),
+    channelClose: () => {},
+  };
+  const chanInfo = {
+    type: 'sftp',
+    incoming: { id: 0, window: 1024, packetSize: 1024, state: 'open' },
+    outgoing: { id: 0, window: 1024, packetSize: 1024, state: 'open' },
+  };
+  const sftp = new SFTP({ protocol }, chanInfo, { server: true });
+  const data = new Uint8Array([0xaa, 0xbb, 0xcc]);
+
+  sftp.data(42, data);
+
+  assertEquals(sent.length, 1);
+  assertEquals(sent[0].length, 2);
+  assertStrictEquals(sent[0][1], data);
+  assertEquals(
+    new Uint8Array([...sent[0][0], ...sent[0][1]]),
+    new Uint8Array([0, 0, 0, 12, 103, 0, 0, 0, 42, 0, 0, 0, 3, 0xaa, 0xbb, 0xcc]),
+  );
 });
 
 Deno.test('SFTP: constructor with remoteIdentRaw matching OpenSSH sets _isOpenSSH', () => {

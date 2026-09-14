@@ -41,3 +41,30 @@ Deno.test('Protocol serializes asynchronous outbound packet encryption', async (
   assertEquals(maxActiveEncryptions, 1);
   assertEquals(writes, [1, 2]);
 });
+
+Deno.test('Protocol assembles segmented channel data in the cipher packet', () => {
+  let encrypted: Uint8Array | undefined;
+  const protocol = new Protocol({
+    server: false,
+    onWrite: () => {},
+    onError: (err) => {
+      throw err;
+    },
+  });
+
+  (protocol as Internal)._cipher = {
+    outSeqno: 0,
+    free: () => {},
+    allocPacket: (payloadLength: number) => new Uint8Array(5 + payloadLength),
+    encrypt: (packet: Uint8Array) => {
+      encrypted = packet;
+    },
+  };
+
+  protocol.channelDataParts(7, [new Uint8Array([1, 2]), new Uint8Array([3, 4])]);
+
+  assertEquals(
+    encrypted?.subarray(5),
+    new Uint8Array([94, 0, 0, 0, 7, 0, 0, 0, 4, 1, 2, 3, 4]),
+  );
+});

@@ -127,6 +127,13 @@ export type Cipher = CipherType;
  */
 export type Decipher = DecipherType;
 
+type SegmentedPayload = {
+  length: number;
+  parts: readonly Uint8Array[];
+};
+
+type OutboundPayload = Uint8Array | SegmentedPayload;
+
 /**
  * Main SSH Protocol class
  */
@@ -153,7 +160,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   private _remoteIdentRaw: Uint8Array | undefined;
   _authsQueue: string[] = [];
   _compatFlags = 0;
-  private _queue: Uint8Array[] | undefined;
+  private _queue: OutboundPayload[] | undefined;
   private _banner: string | undefined;
   private _hostKeys: HostKeyInfo[] | undefined;
 
@@ -177,7 +184,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   // Packet construction can await compression and encryption. Keep one
   // protocol-level queue so channel fragments reach the transport in call
   // order even when callers use the synchronous message API concurrently.
-  private _outboundPackets: Uint8Array[] = [];
+  private _outboundPackets: OutboundPayload[] = [];
   private _sendingPacket = false;
   private _packetDrainPromise: Promise<void> = Promise.resolve();
 
@@ -1596,7 +1603,7 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   /**
    * Send a packet
    */
-  private _sendPacket(payload: Uint8Array, force = false): void {
+  private _sendPacket(payload: OutboundPayload, force = false): void {
     // During rekey, queue non-critical packets
     if (this._queue && !force) {
       this._queue.push(payload);
@@ -1614,19 +1621,38 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     this._sendingPacket = true;
 
     try {
-      while (this._outboundPackets.length > 0) {
-        const payload = this._outboundPackets.shift()!;
+      for (let i = 0; i < this._outboundPackets.length; i++) {
+        const payload = this._outboundPackets[i];
 
         // Compress if enabled
-        let data = payload;
+        let data = payload instanceof Uint8Array ? payload : undefined;
         if (this._compress && this._compressor) {
-          data = await this._compressor.compressAsync(payload);
+          if (!data) {
+            const segmented = payload as SegmentedPayload;
+            data = allocBytes(segmented.length);
+            let offset = 0;
+            for (const part of segmented.parts) {
+              data.set(part, offset);
+              offset += part.length;
+            }
+          }
+          data = await this._compressor.compressAsync(data);
         }
 
-        const packet = this._cipher.allocPacket(data.length);
-        packet.set(data, 5);
-        await this._cipher.encrypt(packet);
+        const packet = this._cipher.allocPacket(data?.length ?? payload.length);
+        if (payload instanceof Uint8Array || this._compress) {
+          packet.set(data!, 5);
+        } else {
+          let offset = 5;
+          for (const part of payload.parts) {
+            packet.set(part, offset);
+            offset += part.length;
+          }
+        }
+        const encrypted = this._cipher.encrypt(packet);
+        if (encrypted) await encrypted;
       }
+      this._outboundPackets.length = 0;
     } catch (err) {
       this._outboundPackets.length = 0;
       this._onError?.(err as Error);
@@ -1795,19 +1821,28 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
    * Send CHANNEL_DATA
    */
   channelData(channel: number, data: Uint8Array): void {
-    const payload = allocBytes(9 + data.length);
+    this.channelDataParts(channel, [data]);
+  }
+
+  /**
+   * Send CHANNEL_DATA assembled directly into the cipher packet.
+   *
+   * Keeping the application payload segmented avoids a complete data-sized
+   * copy here. Compression still materializes it because zlib needs one input.
+   */
+  channelDataParts(channel: number, parts: readonly Uint8Array[]): void {
+    const dataLength = parts.reduce((total, part) => total + part.length, 0);
+    const header = allocBytes(9);
     let offset = 0;
-    payload[offset++] = MESSAGE.CHANNEL_DATA;
-    writeUInt32BE(payload, channel, offset);
+    header[offset++] = MESSAGE.CHANNEL_DATA;
+    writeUInt32BE(header, channel, offset);
     offset += 4;
-    writeUInt32BE(payload, data.length, offset);
-    offset += 4;
-    payload.set(data, offset);
+    writeUInt32BE(header, dataLength, offset);
 
     this._debug?.(
-      `Outbound: Sending CHANNEL_DATA (c:${channel}, ${data.length} bytes)`,
+      `Outbound: Sending CHANNEL_DATA (c:${channel}, ${dataLength} bytes)`,
     );
-    this._sendPacket(payload);
+    this._sendPacket({ length: header.length + dataLength, parts: [header, ...parts] });
   }
 
   /**

@@ -51,7 +51,7 @@ export interface Cipher {
   outSeqno: number;
   free(): void;
   allocPacket(payloadLen: number): Uint8Array;
-  encrypt(packet: Uint8Array): Promise<void>;
+  encrypt(packet: Uint8Array): void | Promise<void>;
 }
 
 /** Base decipher interface */
@@ -92,7 +92,7 @@ export class NullCipher implements Cipher {
     return packet;
   }
 
-  async encrypt(packet: Uint8Array): Promise<void> {
+  encrypt(packet: Uint8Array): void {
     if (this._dead) return;
     this._onWrite(packet);
     this.outSeqno = (this.outSeqno + 1) >>> 0;
