@@ -404,6 +404,19 @@ Deno.test('DenoTransport: non-TCP address returns undefined for all address gett
   assertEquals(transport.localPort, undefined);
 });
 
+Deno.test('DenoTransport: disables Nagle when the connection supports it', () => {
+  let noDelay: boolean | undefined;
+  const mockConn = Object.assign(makeMockConn('tcp'), {
+    setNoDelay(value?: boolean) {
+      noDelay = value;
+    },
+  });
+
+  new DenoTransport(mockConn);
+
+  assertEquals(noDelay, true);
+});
+
 Deno.test('DenoListener: non-TCP address returns empty string and 0 for address getters', () => {
   const mockListener = makeMockListener('unix');
   const listener = new DenoListener(mockListener);

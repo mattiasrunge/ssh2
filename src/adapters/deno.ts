@@ -25,6 +25,10 @@ export class DenoTransport implements Transport {
 
   constructor(conn: Deno.Conn) {
     this._conn = conn;
+    // SSH sends many records in bursts. Disable Nagle so control packets and
+    // the tail of a burst are not held behind delayed acknowledgements.
+    const tcp = conn as Deno.Conn & { setNoDelay?: (noDelay?: boolean) => void };
+    tcp.setNoDelay?.(true);
   }
 
   get readable(): ReadableStream<Uint8Array> {

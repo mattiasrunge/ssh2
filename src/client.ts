@@ -37,6 +37,7 @@ import {
   onChannelOpenFailure,
 } from './utils.ts';
 import { EventEmitter } from './utils/events.ts';
+import { coalesceTransportWrite } from './utils/transport-write.ts';
 
 const STDERR = CHANNEL_EXTENDED_DATATYPE.STDERR;
 const bufferParser = makeBufferParser();
@@ -807,9 +808,10 @@ export class Client extends EventEmitter<ClientEvents> {
     try {
       writer = this._transport.writable.getWriter();
 
-      for (let i = 0; i < this._writeQueue.length; i++) {
-        const data = this._writeQueue[i];
+      for (let i = 0; i < this._writeQueue.length;) {
+        const { data, nextIndex } = coalesceTransportWrite(this._writeQueue, i);
         await writer.write(data);
+        i = nextIndex;
       }
       this._writeQueue.length = 0;
     } catch (err) {

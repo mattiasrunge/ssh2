@@ -34,6 +34,7 @@ import {
 } from './utils.ts';
 import { allocBytes, writeUInt32BE } from './utils/binary.ts';
 import { EventEmitter } from './utils/events.ts';
+import { coalesceTransportWrite } from './utils/transport-write.ts';
 
 const MAX_PENDING_AUTHS = 10;
 
@@ -1316,9 +1317,10 @@ export class Connection extends EventEmitter<ConnectionEvents> {
     try {
       writer = this._transport.writable.getWriter();
 
-      for (let i = 0; i < this._writeQueue.length; i++) {
-        const data = this._writeQueue[i];
+      for (let i = 0; i < this._writeQueue.length;) {
+        const { data, nextIndex } = coalesceTransportWrite(this._writeQueue, i);
         await writer.write(data);
+        i = nextIndex;
       }
       this._writeQueue.length = 0;
     } catch (err) {
