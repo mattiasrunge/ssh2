@@ -1186,19 +1186,23 @@ export class SFTP extends EventEmitter {
     const encodedEntries: Array<{
       filename: Uint8Array;
       longname: Uint8Array;
-      attrsResult: { flags: number; nb: number };
+      attrsFlags: number;
+      attrsBytes: Uint8Array;
     }> = [];
 
     for (const entry of entries) {
       const filename = encoder.encode(entry.filename);
       const longname = encoder.encode(entry.longname ?? '');
       const attrsResult = attrsToBytes(entry.attrs);
+      // attrsToBytes encodes into one shared buffer, so copy this entry's
+      // bytes out before the next entry overwrites them.
+      const attrsBytes = getAttrBytes(attrsResult.nb).slice();
 
-      encodedEntries.push({ filename, longname, attrsResult });
+      encodedEntries.push({ filename, longname, attrsFlags: attrsResult.flags, attrsBytes });
 
       totalSize += 4 + filename.length; // filename string
       totalSize += 4 + longname.length; // longname string
-      totalSize += 4 + attrsResult.nb; // attrs flags + data
+      totalSize += 4 + attrsBytes.length; // attrs flags + data
     }
 
     const buf = allocBytes(totalSize);
@@ -1212,7 +1216,7 @@ export class SFTP extends EventEmitter {
     writeUInt32BE(buf, entries.length, p);
     p += 4;
 
-    for (const { filename, longname, attrsResult } of encodedEntries) {
+    for (const { filename, longname, attrsFlags, attrsBytes } of encodedEntries) {
       // Write filename
       writeUInt32BE(buf, filename.length, p);
       p += 4;
@@ -1226,12 +1230,10 @@ export class SFTP extends EventEmitter {
       p += longname.length;
 
       // Write attrs
-      writeUInt32BE(buf, attrsResult.flags, p);
+      writeUInt32BE(buf, attrsFlags, p);
       p += 4;
-      if (attrsResult.nb) {
-        buf.set(getAttrBytes(attrsResult.nb), p);
-        p += attrsResult.nb;
-      }
+      buf.set(attrsBytes, p);
+      p += attrsBytes.length;
     }
 
     this._sendOrBuffer(buf);

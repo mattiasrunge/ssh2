@@ -564,6 +564,11 @@ Deno.test('SFTP: readdir', async () => {
     assertEquals(returnedList.length, 2);
     assertEquals(returnedList[0].filename, 'foo');
     assertEquals(returnedList[1].filename, 'bar');
+    // Each entry keeps its own attributes, not the last entry's
+    assertEquals(returnedList[0].attrs.mode, 0o40777);
+    assertEquals(returnedList[0].attrs.size, 4096);
+    assertEquals(returnedList[1].attrs.mode, 0o100644);
+    assertEquals(returnedList[1].attrs.size, 513901992);
   });
 });
 
