@@ -7,7 +7,8 @@
 
 import type { Transport } from './adapters/types.ts';
 import { type Agent, AgentContext, createAgent, isAgent } from './agent.ts';
-import { Channel, type ChannelInfo, MAX_WINDOW, PACKET_SIZE } from './Channel.ts';
+import { Channel, type ChannelInfo, MAX_WINDOW, PACKET_SIZE, WINDOW_THRESHOLD } from './Channel.ts';
+import { notifyWindowAdjust } from './channel-window.ts';
 import { hash } from './crypto/mod.ts';
 import {
   CHANNEL_EXTENDED_DATATYPE,
@@ -153,6 +154,11 @@ export type AuthHandler = (
 ) => void;
 
 /**
+ * Supplies a password for password auth; `attempt` counts from 1
+ */
+export type PasswordProvider = (attempt: number) => string | false | Promise<string | false>;
+
+/**
  * Client connection configuration
  */
 export interface ClientConfig {
@@ -166,8 +172,15 @@ export interface ClientConfig {
   username?: string;
   /** Alias for username */
   user?: string;
-  /** Password for authentication */
-  password?: string;
+  /**
+   * Password for authentication, or a provider asked for one each time password
+   * auth is attempted (return `false` to skip password auth). A provider is asked
+   * again after a rejected password, up to `passwordAttempts` times; the ready
+   * timeout does not run while it is pending, so it may prompt a person.
+   */
+  password?: string | PasswordProvider;
+  /** How many times a password provider is asked before giving up (default: 3) */
+  passwordAttempts?: number;
   /** Private key for authentication */
   privateKey?: string | Uint8Array;
   /** Passphrase for encrypted private key */
@@ -306,7 +319,7 @@ export class Client extends EventEmitter<ClientEvents> {
   private _callbacks: Array<(err: Error | boolean, data?: Uint8Array) => void> = [];
   private _forwarding: Map<string, boolean> = new Map();
   private _acceptX11 = 0;
-  private _readyTimeout?: number;
+  private _readyTimeout?: ReturnType<typeof setTimeout>;
   private _keepaliveTimer?: ReturnType<typeof setInterval>;
   private _keepaliveCount = 0;
   private _agent?: Agent;
@@ -314,6 +327,18 @@ export class Client extends EventEmitter<ClientEvents> {
   private _agentKey?: ParsedKey;
   private _privateKey?: ParsedKey;
   private _remoteVer?: string;
+  /** Our auth methods not yet tried, in order */
+  private _authPending: AuthMethod[] = [];
+  private _authCurrent?: AuthMethod;
+  private _authAllowed: string[] = [];
+  private _passwordAttempt = 0;
+  /** Signature algorithms the server accepts for user auth (RFC 8308 server-sig-algs) */
+  private _serverSigAlgs?: string[];
+  /** Signature algorithm of the outstanding publickey query */
+  private _pkAlgo?: string;
+  private _readyDeadline = 0;
+  /** Pending CHANNEL_SUCCESS/FAILURE replies per local channel id, in request order */
+  private _chanReplies = new Map<number, Array<(ok: boolean) => void>>();
   private _exchanges = 0;
   private _config:
     & Required<
@@ -417,6 +442,11 @@ export class Client extends EventEmitter<ClientEvents> {
       });
     }
 
+    // The rest of the handshake and auth shares what is left of readyTimeout
+    this._readyDeadline = Date.now() +
+      (this._config.readyTimeout > 0 ? this._config.readyTimeout : 0);
+    this._armReadyTimeout();
+
     // Set up protocol
     this._setupProtocol(algorithms, hostVerifier, config.debug);
 
@@ -452,6 +482,28 @@ export class Client extends EventEmitter<ClientEvents> {
   }
 
   /**
+   * (Re)start the ready timer for whatever is left until the ready deadline
+   */
+  private _armReadyTimeout() {
+    if (this._readyTimeout) {
+      clearTimeout(this._readyTimeout);
+      this._readyTimeout = undefined;
+    }
+    if (this._config.readyTimeout <= 0) return;
+
+    const remaining = Math.max(0, this._readyDeadline - Date.now());
+    this._readyTimeout = setTimeout(() => {
+      this._readyTimeout = undefined;
+      const err = new Error('Timed out while waiting for handshake') as Error & {
+        level: string;
+      };
+      err.level = 'client-timeout';
+      this.emit('error', err);
+      this.end();
+    }, remaining);
+  }
+
+  /**
    * Build algorithm configuration
    */
   private _buildAlgorithms(config?: AlgorithmConfig) {
@@ -472,7 +524,7 @@ export class Client extends EventEmitter<ClientEvents> {
       // Always include kex-strict-c-v00@openssh.com for strict KEX mode (RFC 9700)
       kex:
         (config?.kex ? generateAlgorithmList(config.kex, DEFAULT_KEX, SUPPORTED_KEX) : DEFAULT_KEX)
-          .concat(['kex-strict-c-v00@openssh.com']),
+          .concat(['ext-info-c', 'kex-strict-c-v00@openssh.com']),
       serverHostKey: config?.serverHostKey
         ? generateAlgorithmList(
           config.serverHostKey,
@@ -592,12 +644,19 @@ export class Client extends EventEmitter<ClientEvents> {
       this.emit('ready');
     };
 
-    handlers.USERAUTH_FAILURE = (_p, authMethods, _partialSuccess) => {
-      // Try next auth method
-      this._tryNextAuth(authMethods);
+    handlers.EXT_INFO = (_p, exts) => {
+      for (const ext of exts) {
+        if (ext.name === 'server-sig-algs' && ext.algs) this._serverSigAlgs = ext.algs;
+      }
     };
 
-    handlers.USERAUTH_PK_OK = (_p, keyAlgo, _keyData) => {
+    handlers.USERAUTH_FAILURE = (_p, authMethods, _partialSuccess) => {
+      this._onAuthFailure(authMethods);
+    };
+
+    handlers.USERAUTH_PK_OK = (_p, echoedAlgo, _keyData) => {
+      // Sign with the algorithm we asked with; a server may echo the key type
+      const keyAlgo = this._pkAlgo ?? echoedAlgo;
       // Server accepted our public key query, now send the actual auth with signature
       if (this._agentCtx && this._agentKey && this._protocol) {
         // Use agent to sign
@@ -664,6 +723,13 @@ export class Client extends EventEmitter<ClientEvents> {
       // deno-lint-ignore no-explicit-any
       const obj = channel as any;
       if (typeof obj.push === 'function' && obj.type === 'sftp') {
+        // SFTP parses synchronously, so its window is replenished as it arrives
+        obj.incoming.window -= data.length;
+        if (obj.incoming.window <= WINDOW_THRESHOLD) {
+          const amount = MAX_WINDOW - obj.incoming.window;
+          obj.incoming.window += amount;
+          this._protocol?.channelWindowAdjust(obj.outgoing.id, amount);
+        }
         obj.push(data);
         return;
       }
@@ -690,21 +756,25 @@ export class Client extends EventEmitter<ClientEvents> {
       const channel = this._chanMgr.get(recipient);
       if (typeof channel !== 'object' || channel === null) return;
 
+      // deno-lint-ignore no-explicit-any
+      const obj = channel as any;
+      if (typeof obj.push === 'function' && obj.type === 'sftp') {
+        obj.outgoing.window += amount;
+        notifyWindowAdjust(obj.outgoing);
+        return;
+      }
+
       (channel as Channel).adjustWindow(amount);
     };
 
     handlers.CHANNEL_SUCCESS = (_p, recipient) => {
       this._resetKeepalive();
-      const channel = this._chanMgr.get(recipient);
-      if (typeof channel !== 'object' || channel === null) return;
-      // Handle channel success callback
+      this._chanReplies.get(recipient)?.shift()?.(true);
     };
 
     handlers.CHANNEL_FAILURE = (_p, recipient) => {
       this._resetKeepalive();
-      const channel = this._chanMgr.get(recipient);
-      if (typeof channel !== 'object' || channel === null) return;
-      // Handle channel failure callback
+      this._chanReplies.get(recipient)?.shift()?.(false);
     };
 
     handlers.CHANNEL_REQUEST = (_p, recipient, type, _wantReply, data) => {
@@ -740,6 +810,7 @@ export class Client extends EventEmitter<ClientEvents> {
     };
 
     handlers.CHANNEL_CLOSE = (_p, recipient) => {
+      this._failChannelReplies(recipient);
       const channel = this._chanMgr.get(recipient);
       if (channel) {
         onChannelClose(this._chanMgr, recipient, channel as ChannelOrCallback);
@@ -836,90 +907,94 @@ export class Client extends EventEmitter<ClientEvents> {
    * Start authentication
    */
   private _startAuth() {
-    // Build list of allowed auth methods
-    const authMethods: AuthMethod[] = ['none'];
-
-    if (this._config.password) {
-      authMethods.push('password');
-    }
-    if (this._privateKey) {
-      authMethods.push('publickey');
-    }
-    if (this._agent) {
-      authMethods.push('agent');
-    }
-    if (this._config.tryKeyboard) {
-      authMethods.push('keyboard-interactive');
-    }
+    // Our methods in the order they are tried; 'none' first to learn what the
+    // server allows, password last as OpenSSH does
+    const methods: AuthMethod[] = ['none'];
+    if (this._privateKey) methods.push('publickey');
+    if (this._agent) methods.push('agent');
     if (this._privateKey && this._config.localHostname && this._config.localUsername) {
-      authMethods.push('hostbased');
+      methods.push('hostbased');
     }
+    if (this._config.tryKeyboard) methods.push('keyboard-interactive');
+    if (this._config.password !== undefined) methods.push('password');
 
-    this._tryNextAuth(authMethods);
+    this._authPending = methods;
+    this._authAllowed = [];
+    this._passwordAttempt = 0;
+    this._tryNextAuth();
   }
 
   /**
-   * Try next authentication method
+   * The server rejected the current attempt: retry within the method while it
+   * has more to offer (agent keys, password attempts), otherwise move on
    */
-  private _tryNextAuth(allowedMethods: string[]) {
-    // Simple auth handler - try methods in order
-    const methods = allowedMethods as AuthMethod[];
+  private _onAuthFailure(allowed: string[]) {
+    this._authAllowed = allowed;
 
-    for (const method of methods) {
+    if (this._authCurrent === 'agent' && this._agentCtx && allowed.includes('publickey')) {
+      this._tryAgentAuth();
+      return;
+    }
+
+    if (
+      this._authCurrent === 'password' &&
+      typeof this._config.password === 'function' &&
+      this._passwordAttempt < (this._config.passwordAttempts ?? 3) &&
+      allowed.includes('password')
+    ) {
+      this._tryPasswordAuth();
+      return;
+    }
+
+    this._tryNextAuth();
+  }
+
+  /**
+   * Try the next of our methods that the server allows; each is tried once
+   */
+  private _tryNextAuth() {
+    while (this._authPending.length > 0) {
+      const method = this._authPending.shift()!;
+      this._authCurrent = method;
+
+      // Until the first failure (usually 'none') we do not know what the server allows
+      const wire = method === 'agent' ? 'publickey' : method;
+      if (this._authAllowed.length > 0 && !this._authAllowed.includes(wire)) continue;
+
       switch (method) {
         case 'none':
           this._protocol?.authNone(this._config.username);
           return;
 
-        case 'password':
-          if (this._config.password) {
-            this._protocol?.authPassword(this._config.username, this._config.password);
-            return;
-          }
-          break;
-
         case 'publickey':
-          // Try privateKey first, then agent (agent uses publickey protocol)
-          if (this._privateKey) {
-            this._protocol?.authPK(this._config.username, this._privateKey);
-            return;
-          }
-          if (this._agent) {
-            this._tryAgentAuth();
-            return;
-          }
-          break;
+          this._pkAlgo = this._keyAlgo(this._privateKey!);
+          this._protocol?.authPK(this._config.username, this._privateKey!, this._pkAlgo);
+          return;
 
         case 'agent':
-          // Agent uses publickey protocol
-          if (this._agent) {
-            this._tryAgentAuth();
-            return;
-          }
-          break;
-
-        case 'keyboard-interactive':
-          if (this._config.tryKeyboard) {
-            this._protocol?.authKeyboard(this._config.username);
-            return;
-          }
-          break;
+          this._tryAgentAuth();
+          return;
 
         case 'hostbased':
-          if (this._privateKey && this._config.localHostname) {
-            this._protocol?.authHostbased(
-              this._config.username!,
-              this._privateKey,
-              this._config.localHostname,
-              this._config.localUsername || this._config.username!,
-            );
-            return;
-          }
-          break;
+          this._protocol?.authHostbased(
+            this._config.username,
+            this._privateKey!,
+            this._config.localHostname!,
+            this._config.localUsername || this._config.username,
+          );
+          return;
+
+        case 'keyboard-interactive':
+          this._protocol?.authKeyboard(this._config.username);
+          return;
+
+        case 'password':
+          this._tryPasswordAuth();
+          return;
       }
     }
 
-    // No more auth methods
+    this._authCurrent = undefined;
     const err = new Error('All configured authentication methods failed') as Error & {
       level: string;
     };
@@ -929,13 +1004,70 @@ export class Client extends EventEmitter<ClientEvents> {
   }
 
   /**
-   * Try agent authentication
+   * Send a password, asking the provider for it when one is configured
+   */
+  private async _tryPasswordAuth() {
+    const password = this._config.password;
+    this._passwordAttempt++;
+
+    if (typeof password === 'string') {
+      this._protocol?.authPassword(this._config.username, password);
+      return;
+    }
+    if (typeof password !== 'function') {
+      this._tryNextAuth();
+      return;
+    }
+
+    // A person may be typing: the ready timeout waits for them
+    const deadlineLeft = this._readyDeadline - Date.now();
+    if (this._readyTimeout) {
+      clearTimeout(this._readyTimeout);
+      this._readyTimeout = undefined;
+    }
+
+    let value: string | false;
+    try {
+      value = await password(this._passwordAttempt);
+    } catch (err) {
+      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      this.end();
+      return;
+    }
+    if (!this._protocol) return;
+
+    this._readyDeadline = Date.now() + Math.max(deadlineLeft, 0);
+    this._armReadyTimeout();
+
+    if (value === false) {
+      this._tryNextAuth();
+      return;
+    }
+    this._protocol.authPassword(this._config.username, value);
+  }
+
+  /**
+   * Signature algorithm for a user key: RSA keys sign with SHA-2 when the server
+   * says (server-sig-algs) it accepts that, as OpenSSH 8.8+ refuses `ssh-rsa`
+   */
+  private _keyAlgo(key: ParsedKey): string {
+    if (key.type !== 'ssh-rsa') return key.type;
+    const algs = this._serverSigAlgs;
+    if (algs?.includes('rsa-sha2-512')) return 'rsa-sha2-512';
+    if (algs?.includes('rsa-sha2-256')) return 'rsa-sha2-256';
+    return 'ssh-rsa';
+  }
+
+  /**
+   * Try agent authentication with the agent's next key
    */
   private async _tryAgentAuth() {
-    if (!this._agent) return;
+    if (!this._agent) {
+      this._tryNextAuth();
+      return;
+    }
 
     try {
-      // Create or reuse agent context
       if (!this._agentCtx) {
         this._agentCtx = new AgentContext(this._agent);
         await this._agentCtx.init();
@@ -944,19 +1076,18 @@ export class Client extends EventEmitter<ClientEvents> {
       const key = this._agentCtx.nextKey();
       if (key) {
         this._agentKey = key;
-        this._protocol?.authPK(this._config.username, key);
-      } else {
-        // No more agent keys, clear context and try next auth method
-        this._agentCtx = undefined;
-        this._agentKey = undefined;
-        this._tryNextAuth([]);
+        this._pkAlgo = this._keyAlgo(key);
+        this._protocol?.authPK(this._config.username, key, this._pkAlgo);
+        return;
       }
     } catch (err) {
       this._config.debug?.(`Agent auth error: ${(err as Error).message}`);
-      this._agentCtx = undefined;
-      this._agentKey = undefined;
-      this._tryNextAuth([]);
     }
+
+    // No more agent keys
+    this._agentCtx = undefined;
+    this._agentKey = undefined;
+    this._tryNextAuth();
   }
 
   /**
@@ -1209,6 +1340,27 @@ export class Client extends EventEmitter<ClientEvents> {
   }
 
   /**
+   * Wait for the reply to a want-reply request just sent on a channel. Replies
+   * come back in request order, so every want-reply request must register one.
+   */
+  private _channelReply(localId: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let queue = this._chanReplies.get(localId);
+      if (!queue) {
+        queue = [];
+        this._chanReplies.set(localId, queue);
+      }
+      queue.push(resolve);
+    });
+  }
+
+  private _failChannelReplies(localId: number) {
+    const queue = this._chanReplies.get(localId);
+    this._chanReplies.delete(localId);
+    for (const cb of queue ?? []) cb(false);
+  }
+
+  /**
    * Execute a command on the server
    */
   exec(command: string, options?: ExecOptions): Promise<Channel> {
@@ -1240,11 +1392,19 @@ export class Client extends EventEmitter<ClientEvents> {
         // Request agent forwarding if specified
         if (options?.agentForward) {
           this._protocol?.authAgentRequest(channel.outgoing.id!);
+          this._channelReply(channel.incoming.id!);
         }
 
         // Execute command
         this._protocol?.exec(channel.outgoing.id!, command, true);
         channel.subtype = 'exec';
+        // Resolve now rather than on the reply: a caller attaching listeners
+        // after the await must not miss output or an exit status that arrives
+        // right behind the reply. A refusal closes the channel.
+        channel.accepted = this._channelReply(channel.incoming.id!).then((ok) => {
+          if (!ok) channel.close();
+          return ok;
+        });
         resolve(channel);
       });
     });
@@ -1284,11 +1444,19 @@ export class Client extends EventEmitter<ClientEvents> {
         // Request agent forwarding if specified
         if (options?.agentForward) {
           this._protocol?.authAgentRequest(channel.outgoing.id!);
+          this._channelReply(channel.incoming.id!);
         }
 
         // Start shell
         this._protocol?.shell(channel.outgoing.id!, true);
         channel.subtype = 'shell';
+        // Resolve now rather than on the reply: a caller attaching listeners
+        // after the await must not miss output or an exit status that arrives
+        // right behind the reply. A refusal closes the channel.
+        channel.accepted = this._channelReply(channel.incoming.id!).then((ok) => {
+          if (!ok) channel.close();
+          return ok;
+        });
         resolve(channel);
       });
     });
@@ -1364,6 +1532,12 @@ export class Client extends EventEmitter<ClientEvents> {
 
         // Request SFTP subsystem then initialize
         this._protocol?.subsystem(channel.outgoing.id!, 'sftp', true);
+        this._channelReply(channel.incoming.id!).then((ok) => {
+          if (ok) return;
+          removeListeners();
+          sftp.end();
+          reject(new Error('sftp subsystem request refused by server'));
+        });
 
         // Initialize SFTP protocol (sends version packet)
         sftp._init();
@@ -1559,6 +1733,8 @@ export class Client extends EventEmitter<ClientEvents> {
    * Clean up pending callbacks and channels
    */
   private _cleanup(err: Error): void {
+    for (const localId of [...this._chanReplies.keys()]) this._failChannelReplies(localId);
+
     // Clean up channel manager (will call pending channel open callbacks)
     this._chanMgr.cleanup(err);
 

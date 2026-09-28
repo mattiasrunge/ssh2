@@ -483,7 +483,9 @@ import { Client, generateKeyPair, parseKey, Server } from 'jsr:@ein/ssh2-ts';
 - **end**() - The socket was disconnected.
 
 - **error**(err: Error) - An error occurred. A `level` property indicates `'client-socket'` for
-  socket-level errors and `'client-ssh'` for SSH disconnection messages.
+  socket-level errors, `'client-ssh'` for SSH disconnection messages, `'client-timeout'` when
+  `readyTimeout` or keepalives expire, and `'client-authentication'` once every configured auth
+  method has been tried once (and a password provider `passwordAttempts` times) and failed.
 
 - **handshake**(negotiated: object) - Emitted when a handshake has completed (either initial or
   rekey). `negotiated` contains the negotiated algorithms:
@@ -526,7 +528,8 @@ import { Client, generateKeyPair, parseKey, Server } from 'jsr:@ein/ssh2-ts';
   | `host`              | string                                                       | `'localhost'` | Hostname or IP address                                                                                                                                                                |
   | `port`              | number                                                       | `22`          | Port number                                                                                                                                                                           |
   | `username`          | string                                                       |               | Username for authentication                                                                                                                                                           |
-  | `password`          | string                                                       |               | Password for password auth                                                                                                                                                            |
+  | `password`          | string \| (attempt: number) => string \| false \| Promise    |               | Password, or a provider asked each time password auth is tried (`false` skips it). A provider is asked again after a rejected password; the ready timeout waits for it                |
+  | `passwordAttempts`  | number                                                       | `3`           | How many times a password provider is asked                                                                                                                                           |
   | `privateKey`        | string \| Uint8Array \| ParsedKey                            |               | Private key for key-based auth                                                                                                                                                        |
   | `passphrase`        | string                                                       |               | Passphrase for encrypted private key                                                                                                                                                  |
   | `agent`             | string                                                       |               | Path to ssh-agent UNIX socket                                                                                                                                                         |
@@ -534,7 +537,7 @@ import { Client, generateKeyPair, parseKey, Server } from 'jsr:@ein/ssh2-ts';
   | `hostHash`          | string                                                       |               | Hash algorithm for hostVerifier (e.g. `'sha256'`)                                                                                                                                     |
   | `hostVerifier`      | (key: Uint8Array \| string) => boolean \| Promise\<boolean\> |               | Host key verification function. **If omitted, the server host key is accepted without verification, leaving the connection open to man-in-the-middle attacks** (a warning is logged). |
   | `algorithms`        | AlgorithmConfig                                              |               | Override default algorithms                                                                                                                                                           |
-  | `readyTimeout`      | number                                                       | `20000`       | Handshake timeout (ms)                                                                                                                                                                |
+  | `readyTimeout`      | number                                                       | `20000`       | Time (ms) allowed for the TCP connect, handshake and authentication; the error has `level: 'client-timeout'`                                                                          |
   | `keepaliveInterval` | number                                                       | `0`           | Keepalive interval (ms)                                                                                                                                                               |
   | `keepaliveCountMax` | number                                                       | `3`           | Max unanswered keepalives                                                                                                                                                             |
   | `sock`              | Transport                                                    |               | Existing transport for connection hopping                                                                                                                                             |
@@ -689,6 +692,9 @@ Client-specific (for exec/shell):
 - **stderr** property contains a readable stream for stderr output.
 - **exit** event - Emitted when the process finishes: `(code: number)` for normal exit, or
   `(null, signalName, didCoreDump, description)` for signal exit.
+- **accepted**: Promise\<boolean\> - Settles with the server's answer to the exec/shell request.
+  `exec()`/`shell()` resolve before that answer so no early output is missed; a refused request
+  settles `false` and closes the channel.
 - **setWindow**(rows, cols, height, width) - Notify server of terminal resize.
 - **signal**(signalName: string) - Send a POSIX signal to the remote process.
 

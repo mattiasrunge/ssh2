@@ -147,6 +147,12 @@ export class Channel extends EventEmitter<ChannelEvents> {
 
   /** Channel subtype (shell, exec, subsystem) */
   subtype?: string;
+  /**
+   * Client side: settles with the server's answer to the exec/shell request
+   * that started this channel (false when it was refused, in which case the
+   * channel is closed). Undefined for channels not started by such a request.
+   */
+  accepted?: Promise<boolean>;
 
   /** Whether this is server-side */
   readonly server: boolean;

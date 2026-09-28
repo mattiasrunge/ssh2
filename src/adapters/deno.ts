@@ -176,32 +176,24 @@ export class DenoTransportFactory implements TransportFactory {
   async connect(options: TransportOptions): Promise<Transport> {
     const { host, port, timeout } = options;
 
-    // Create connection with optional timeout
     let conn: Deno.Conn;
 
     if (timeout && timeout > 0) {
-      // Use AbortSignal for timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
       try {
-        conn = await Deno.connect({
-          hostname: host,
-          port,
-        });
-        clearTimeout(timeoutId);
+        conn = await Deno.connect({ hostname: host, port, signal: controller.signal });
       } catch (err) {
-        clearTimeout(timeoutId);
         if (controller.signal.aborted) {
           throw new Error(`Connection timeout after ${timeout}ms`);
         }
         throw err;
+      } finally {
+        clearTimeout(timeoutId);
       }
     } else {
-      conn = await Deno.connect({
-        hostname: host,
-        port,
-      });
+      conn = await Deno.connect({ hostname: host, port });
     }
 
     // Note: Deno doesn't have direct keepAlive options on connect

@@ -142,6 +142,7 @@ export class SFTP extends EventEmitter {
 
   private _debug?: (msg: string) => void;
   private _isOpenSSH: boolean;
+  private _isSsh2ts: boolean;
   private _version = -1;
   private _extensions: SFTPExtensions = {};
   private _biOpt?: boolean;
@@ -186,6 +187,7 @@ export class SFTP extends EventEmitter {
     this.server = !!config.server;
     this._debug = config.debug;
     this._isOpenSSH = !!(remoteIdentRaw && RE_OPENSSH.test(remoteIdentRaw));
+    this._isSsh2ts = !!(remoteIdentRaw && /^SSH-2\.0-ssh2ts/.test(remoteIdentRaw));
     this._biOpt = config.biOpt;
 
     this._maxInPktLen = OPENSSH_MAX_PKT_LEN;
@@ -865,9 +867,11 @@ export class SFTP extends EventEmitter {
     const targetBytes = fromString(targetPath);
     const linkBytes = fromString(linkPath);
 
-    // Note: OpenSSH has the arguments reversed from the spec
-    const first = this._isOpenSSH ? linkBytes : targetBytes;
-    const second = this._isOpenSSH ? targetBytes : linkBytes;
+    // The draft spec sends linkpath then targetpath; OpenSSH, dropbear and this
+    // library's own server read them the other way round
+    const targetFirst = this._isOpenSSH || this._isSsh2ts;
+    const first = targetFirst ? targetBytes : linkBytes;
+    const second = targetFirst ? linkBytes : targetBytes;
 
     const buf = allocBytes(4 + 1 + 4 + 4 + first.length + 4 + second.length);
     let p = 0;

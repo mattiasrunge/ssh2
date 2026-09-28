@@ -24,7 +24,14 @@ import {
   writeUInt32BE,
 } from '../utils/binary.ts';
 import { EventEmitter } from '../utils/events.ts';
-import { CIPHER_INFO, COMPAT_CHECKS, DISCONNECT_REASON, MAC_INFO, MESSAGE } from './constants.ts';
+import {
+  CIPHER_INFO,
+  COMPAT_CHECKS,
+  DISCONNECT_REASON,
+  MAC_INFO,
+  MESSAGE,
+  SUPPORTED_SERVER_HOST_KEY,
+} from './constants.ts';
 import { type HandlerProtocol, MESSAGE_HANDLERS, type ProtocolHandlers } from './handlers.ts';
 import {
   createDefaultOffer,
@@ -171,6 +178,8 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
   _kex: { sessionID: Uint8Array } = { sessionID: new Uint8Array(0) };
   private _strictKex = false; // RFC 9700 strict KEX mode
   private _firstKexComplete = false; // set once the first NEWKEYS is processed
+  private _peerExtInfo = false; // peer offered ext-info-c/-s in its first KEXINIT (RFC 8308)
+  private _extInfoSent = false;
   private _kexInitPromise: Promise<void> | undefined; // Promise for key exchange initialization
 
   // Encryption
@@ -630,6 +639,11 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
 
     this._debug?.(`Negotiated algorithms: ${JSON.stringify(result.algorithms)}`);
 
+    // RFC 8308 only honours ext-info-c/-s in the first KEXINIT
+    if (!this._firstKexComplete && result.extInfo) {
+      this._peerExtInfo = true;
+    }
+
     // Track strict KEX mode (RFC 9700)
     if (result.strictKex) {
       this._strictKex = true;
@@ -789,6 +803,15 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
 
     // Switch cipher for sending (server to client)
     this._switchOutboundCipher();
+
+    // RFC 8308: a server may send EXT_INFO as the next packet after its first
+    // NEWKEYS. server-sig-algs tells the client which signature algorithms user
+    // auth accepts, without which a client must sign an RSA key with SHA-1
+    // (`ssh-rsa`).
+    if (this._peerExtInfo && !this._extInfoSent) {
+      this._extInfoSent = true;
+      this.sendExtInfo([{ name: 'server-sig-algs', value: SUPPORTED_SERVER_HOST_KEY.join(',') }]);
+    }
 
     this._debug?.('Server key exchange complete, waiting for client NEWKEYS');
   }
@@ -2033,6 +2056,38 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
 
     this._debug?.(`Outbound: Sending USERAUTH_REQUEST (password)`);
     this._sendPacket(payload);
+  }
+
+  /**
+   * Send SSH_MSG_EXT_INFO (RFC 8308)
+   */
+  sendExtInfo(exts: Array<{ name: string; value: string }>): void {
+    const encoded = exts.map((ext) => ({
+      name: fromString(ext.name),
+      value: fromString(ext.value),
+    }));
+    let len = 1 + 4;
+    for (const ext of encoded) len += 4 + ext.name.length + 4 + ext.value.length;
+
+    const payload = allocBytes(len);
+    let offset = 0;
+    payload[offset++] = MESSAGE.EXT_INFO;
+    writeUInt32BE(payload, encoded.length, offset);
+    offset += 4;
+    for (const ext of encoded) {
+      writeUInt32BE(payload, ext.name.length, offset);
+      offset += 4;
+      payload.set(ext.name, offset);
+      offset += ext.name.length;
+      writeUInt32BE(payload, ext.value.length, offset);
+      offset += 4;
+      payload.set(ext.value, offset);
+      offset += ext.value.length;
+    }
+
+    this._debug?.('Outbound: Sending EXT_INFO');
+    // Only valid directly after NEWKEYS, so it must not wait in the rekey queue
+    this._sendPacket(payload, true);
   }
 
   /**

@@ -550,7 +550,7 @@ export class KexHandler {
    */
   handleKexInit(
     payload: Uint8Array,
-  ): { algorithms: NegotiatedAlgorithms; strictKex: boolean } | Error {
+  ): { algorithms: NegotiatedAlgorithms; strictKex: boolean; extInfo: boolean } | Error {
     this._state.remoteKexinit = payload;
 
     const remoteOffer = parseKexInit(payload);
@@ -571,8 +571,11 @@ export class KexHandler {
       : 'kex-strict-s-v00@openssh.com';
     const strictKex = remoteOffer.kex.includes(strictExtension);
 
+    // RFC 8308: the peer is willing to receive SSH_MSG_EXT_INFO
+    const extInfo = remoteOffer.kex.includes(this._isServer ? 'ext-info-c' : 'ext-info-s');
+
     this._state.algorithms = algorithms;
-    return { algorithms, strictKex };
+    return { algorithms, strictKex, extInfo };
   }
 
   /**

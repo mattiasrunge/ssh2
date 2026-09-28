@@ -224,7 +224,12 @@ export class PKAuthContext extends ServerAuthContext {
   override accept(): void {
     if (!this.signature) {
       this._initialResponse = true;
-      this._protocol.authPKOK(this.key.algo, this.key.data);
+      // PK_OK repeats the algorithm the client asked with (RFC 4252 7), which
+      // for RSA names the hash rather than the key type
+      let requested = this.key.algo;
+      if (requested === 'ssh-rsa' && this.hashAlgo === 'sha256') requested = 'rsa-sha2-256';
+      if (requested === 'ssh-rsa' && this.hashAlgo === 'sha512') requested = 'rsa-sha2-512';
+      this._protocol.authPKOK(requested, this.key.data);
     } else {
       super.accept();
     }
@@ -1160,10 +1165,19 @@ export class Connection extends EventEmitter<ConnectionEvents> {
       if (typeof channel !== 'object' || channel === null) return;
 
       if (channel instanceof Session) {
+        if (!channel._channel) {
+          // No exec/shell/subsystem was ever started (e.g. it was refused), so
+          // nothing else will answer the close: do it here (RFC 4254 5.3)
+          const outId = channel._chanInfo.outgoing.id;
+          if (channel._chanInfo.outgoing.state !== 'closed' && outId !== undefined) {
+            this._protocol.channelClose(outId);
+          }
+          onChannelClose(this._chanMgr, recipient, channel as unknown as ChannelOrCallback);
+          return;
+        }
         channel._ending = true;
         channel.emit('close');
         channel = channel._channel as unknown as ChannelOrCallback;
-        if (!channel) return;
       }
 
       onChannelClose(this._chanMgr, recipient, channel);
