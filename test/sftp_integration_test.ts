@@ -904,9 +904,11 @@ Deno.test('SFTP: read returns 0 when server sends EOF status', async () => {
 });
 
 Deno.test('SFTP: push(null) emits end event and cleans up pending requests', async () => {
-  await runSFTPTest('push null', async (client, _server) => {
-    // Send a stat request but don't respond — then push(null)
+  await runSFTPTest('push null', async (client, server) => {
+    // Send a stat request but don't respond — then push(null). The listener is
+    // what keeps it pending: an unhandled request is answered OP_UNSUPPORTED.
     let pendingRejectErr: Error | null = null;
+    server.on('STAT', () => {});
 
     const statPromise = client.stat('/some/path').catch((err) => {
       pendingRejectErr = err;
@@ -1803,5 +1805,97 @@ Deno.test('SFTP: readdir(path) terminates on the end-of-listing EOF status', asy
     assertEquals(result.length, 2);
     assertEquals(result[0].filename, 'a.txt');
     assertEquals(result[1].filename, 'b.txt');
+  });
+});
+
+// =============================================================================
+// Requests the server does not handle
+// =============================================================================
+
+/** A server SFTP past INIT, fed raw packets; returns every packet it sends back. */
+async function makeRawSFTPServer(): Promise<{ server: SFTP; sent: Uint8Array[]; errors: Error[] }> {
+  const sent: Uint8Array[] = [];
+  const errors: Error[] = [];
+  const protocol = {
+    channelData: (_id: number, data: Uint8Array) => sent.push(data.slice()),
+    channelClose: () => {},
+  };
+  const chanInfo = {
+    type: 'sftp',
+    incoming: { id: 0, window: 2 * 1024 * 1024, packetSize: 32768, state: 'open' },
+    outgoing: { id: 0, window: 2 * 1024 * 1024, packetSize: 32768, state: 'open' },
+  };
+  const server = new SFTP({ protocol }, chanInfo, { server: true });
+  server.on('error', (e: Error) => errors.push(e));
+  const ready = new Promise<void>((resolve) => server.once('ready', resolve));
+  server.push(new Uint8Array([0, 0, 0, 5, 1, 0, 0, 0, 3])); // INIT v3
+  await ready;
+  sent.length = 0;
+  return { server, sent, errors };
+}
+
+function rawPacket(type: number, reqId: number, ...strings: string[]): Uint8Array {
+  const encoded = strings.map((s) => new TextEncoder().encode(s));
+  const length = 1 + 4 + encoded.reduce((n, s) => n + 4 + s.length, 0);
+  const buf = new Uint8Array(4 + length);
+  const view = new DataView(buf.buffer);
+  view.setUint32(0, length);
+  buf[4] = type;
+  view.setUint32(5, reqId);
+  let p = 9;
+  for (const s of encoded) {
+    view.setUint32(p, s.length);
+    buf.set(s, p + 4);
+    p += 4 + s.length;
+  }
+  return buf;
+}
+
+/** The (reqId, code) of a STATUS packet, or undefined for anything else. */
+function statusOf(packet: Uint8Array): { reqId: number; code: number } | undefined {
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+  if (packet[4] !== 101) return undefined;
+  return { reqId: view.getUint32(5), code: view.getUint32(9) };
+}
+
+Deno.test('SFTP server: EXTENDED without a listener answers OP_UNSUPPORTED and keeps the session', async () => {
+  const { server, sent, errors } = await makeRawSFTPServer();
+
+  server.push(rawPacket(200, 7, 'statvfs@openssh.com', '/'));
+  await new Promise<void>((r) => setTimeout(r, 0));
+
+  assertEquals(errors, []);
+  assertEquals(sent.map(statusOf), [{ reqId: 7, code: STATUS_CODE.OP_UNSUPPORTED }]);
+});
+
+Deno.test('SFTP server: EXTENDED is emitted with its name when there is a listener', async () => {
+  const { server, sent } = await makeRawSFTPServer();
+  const seen: unknown[] = [];
+  server.on('EXTENDED', (reqId: number, name: string, data: Uint8Array) => {
+    seen.push([reqId, name, [...data]]);
+    server.status(reqId, STATUS_CODE.OK);
+  });
+
+  server.push(rawPacket(200, 3, 'limits@openssh.com', 'ab'));
+  await new Promise<void>((r) => setTimeout(r, 0));
+
+  assertEquals(seen, [[3, 'limits@openssh.com', [0, 0, 0, 2, 97, 98]]]);
+  assertEquals(sent.map(statusOf), [{ reqId: 3, code: STATUS_CODE.OK }]);
+});
+
+Deno.test('SFTP server: an unknown request type answers OP_UNSUPPORTED', async () => {
+  const { server, sent, errors } = await makeRawSFTPServer();
+
+  server.push(rawPacket(99, 11));
+  await new Promise<void>((r) => setTimeout(r, 0));
+
+  assertEquals(errors, []);
+  assertEquals(sent.map(statusOf), [{ reqId: 11, code: STATUS_CODE.OP_UNSUPPORTED }]);
+});
+
+Deno.test('SFTP server: a request with no listener answers OP_UNSUPPORTED instead of hanging', async () => {
+  await runSFTPTest('no listener', async (client) => {
+    const err = await assertRejects(() => client.symlink('/target', '/link'));
+    assertEquals((err as { code?: number }).code, STATUS_CODE.OP_UNSUPPORTED);
   });
 });

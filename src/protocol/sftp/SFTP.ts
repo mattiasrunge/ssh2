@@ -1695,10 +1695,52 @@ export class SFTP extends EventEmitter {
         return this._handleReadlink(payload);
       case REQUEST.SYMLINK:
         return this._handleSymlink(payload);
+      case REQUEST.EXTENDED:
+        return this._handleExtended(payload);
       default:
-        this._doFatalError(`Unknown packet type ${type}`);
-        return false;
+        return this._handleUnknownRequest(type, payload);
     }
+  }
+
+  /**
+   * EXTENDED carries its extension's name first; the rest of the payload is
+   * the extension's own. Emitted as `EXTENDED(reqId, name, data)`, so with no
+   * listener it is answered OP_UNSUPPORTED like any other unhandled request.
+   */
+  private _handleExtended(payload: Uint8Array): boolean {
+    this._parser.init(payload, 1);
+    const reqId = this._parser.readUInt32BE();
+    const name = this._parser.readString(true) as string | undefined;
+    const pos = this._parser.pos;
+    this._parser.clear();
+
+    if (name === undefined) {
+      this._doFatalError('Malformed EXTENDED packet');
+      return false;
+    }
+
+    this._debug?.(`SFTP: Inbound: Received EXTENDED ${name} (id:${reqId})`);
+    return this._emitServerRequest('EXTENDED', reqId!, name, payload.subarray(pos));
+  }
+
+  /**
+   * A request type this server does not know. Every request carries an id, so
+   * it can be answered OP_UNSUPPORTED as the protocol draft asks, instead of
+   * ending the whole session over one request.
+   */
+  private _handleUnknownRequest(type: number, payload: Uint8Array): boolean {
+    this._parser.init(payload, 1);
+    const reqId = this._parser.readUInt32BE();
+    this._parser.clear();
+
+    if (reqId === undefined) {
+      this._doFatalError(`Unknown packet type ${type}`);
+      return false;
+    }
+
+    this._debug?.(`SFTP: Inbound: Received unknown request type ${type} (id:${reqId})`);
+    this.status(reqId, STATUS_CODE.OP_UNSUPPORTED);
+    return true;
   }
 
   private _handleInit(payload: Uint8Array): boolean {
@@ -1720,6 +1762,12 @@ export class SFTP extends EventEmitter {
   }
 
   private _emitServerRequest(name: string, reqId: number, ...args: unknown[]): boolean {
+    // Nobody would ever answer a request without a listener, and the client
+    // would wait for it forever.
+    if (this.listenerCount(name) === 0) {
+      this.status(reqId, STATUS_CODE.OP_UNSUPPORTED);
+      return true;
+    }
     this.emit(name, reqId, ...args);
     return true;
   }
