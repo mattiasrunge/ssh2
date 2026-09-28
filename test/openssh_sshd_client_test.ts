@@ -264,3 +264,27 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: 'openssh sshd: an interactive shell with a pty',
+  ignore,
+  async fn() {
+    const key = await generateKeyPair('ed25519');
+    const sshd = await startSshd([key.public]);
+    try {
+      const client = await connect(sshd.port, key.private);
+      const channel = await client.shell({ pty: { rows: 30, cols: 100, term: 'xterm-256color' } });
+      assertEquals(await channel.accepted, true);
+
+      const status = new Promise<number>((resolve) => channel.on('exit-status', resolve));
+      // A pty makes stdin a terminal; stty proves it and reports the size asked for
+      channel.write('stty size; exit 7\n');
+      const out = await readAll(channel.readable);
+      assert(out.includes('30 100'), `stty size in: ${JSON.stringify(out)}`);
+      assertEquals(await status, 7);
+      client.end();
+    } finally {
+      await sshd.stop();
+    }
+  },
+});

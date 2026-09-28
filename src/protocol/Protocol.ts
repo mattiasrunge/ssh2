@@ -2864,9 +2864,12 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     const termBytes = fromString(term);
     // Simplified - no terminal modes for now
     const modesBytes = new Uint8Array([0]); // TTY_OP_END
+    const reqType = fromString('pty-req');
 
+    // Sized from the request name: a byte too many here is trailing garbage
+    // that OpenSSH refuses ("unexpected bytes remain"), closing the session
     const payload = allocBytes(
-      1 + 4 + 4 + 9 + 4 + termBytes.length + 4 + 4 + 4 + 4 + 4 + modesBytes.length,
+      1 + 4 + 4 + reqType.length + 1 + 4 + termBytes.length + 4 + 4 + 4 + 4 + 4 + modesBytes.length,
     );
     let offset = 0;
 
@@ -2874,7 +2877,6 @@ export class Protocol extends EventEmitter implements FatalErrorProtocol, Handle
     writeUInt32BE(payload, channel, offset);
     offset += 4;
 
-    const reqType = fromString('pty-req');
     writeUInt32BE(payload, reqType.length, offset);
     offset += 4;
     payload.set(reqType, offset);
