@@ -504,6 +504,26 @@ export class Client extends EventEmitter<ClientEvents> {
   }
 
   /**
+   * Run something that may wait on a person (a host key question, a password,
+   * an agent asking for a passphrase) with the ready timeout paused
+   */
+  private async _whilePaused<T>(fn: () => T | Promise<T>): Promise<T> {
+    const deadlineLeft = this._readyDeadline - Date.now();
+    if (this._readyTimeout) {
+      clearTimeout(this._readyTimeout);
+      this._readyTimeout = undefined;
+    }
+    try {
+      return await fn();
+    } finally {
+      if (this._protocol && this._config.readyTimeout > 0 && this._readyDeadline > 0) {
+        this._readyDeadline = Date.now() + Math.max(deadlineLeft, 0);
+        this._armReadyTimeout();
+      }
+    }
+  }
+
+  /**
    * Build algorithm configuration
    */
   private _buildAlgorithms(config?: AlgorithmConfig) {
@@ -555,7 +575,9 @@ export class Client extends EventEmitter<ClientEvents> {
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('');
       }
-      return verifier(keyData);
+
+      // A verifier may ask a person about an unknown host
+      return await this._whilePaused(() => verifier(keyData));
     };
   }
 
@@ -659,12 +681,12 @@ export class Client extends EventEmitter<ClientEvents> {
       const keyAlgo = this._pkAlgo ?? echoedAlgo;
       // Server accepted our public key query, now send the actual auth with signature
       if (this._agentCtx && this._agentKey && this._protocol) {
-        // Use agent to sign
-        this._protocol.authPKSignWithAgent(
-          this._config.username,
-          this._agentKey,
-          this._agentCtx,
-          keyAlgo,
+        // Use agent to sign; an agent may ask a person for a passphrase
+        const protocol = this._protocol;
+        const agentKey = this._agentKey;
+        const agentCtx = this._agentCtx;
+        this._whilePaused(() =>
+          protocol.authPKSignWithAgent(this._config.username, agentKey, agentCtx, keyAlgo)
         ).catch((err: unknown) => {
           this._config.debug?.(`Agent sign error: ${(err as Error).message}`);
           // Try next agent key
@@ -1019,25 +1041,15 @@ export class Client extends EventEmitter<ClientEvents> {
       return;
     }
 
-    // A person may be typing: the ready timeout waits for them
-    const deadlineLeft = this._readyDeadline - Date.now();
-    if (this._readyTimeout) {
-      clearTimeout(this._readyTimeout);
-      this._readyTimeout = undefined;
-    }
-
     let value: string | false;
     try {
-      value = await password(this._passwordAttempt);
+      value = await this._whilePaused(() => password(this._passwordAttempt));
     } catch (err) {
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       this.end();
       return;
     }
     if (!this._protocol) return;
-
-    this._readyDeadline = Date.now() + Math.max(deadlineLeft, 0);
-    this._armReadyTimeout();
 
     if (value === false) {
       this._tryNextAuth();

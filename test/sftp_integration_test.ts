@@ -572,6 +572,25 @@ Deno.test('SFTP: readdir', async () => {
   });
 });
 
+Deno.test('SFTP: readdir of a directory with exactly one entry', async () => {
+  await runSFTPTest('readdir one', async (client, server) => {
+    const handle = new TextEncoder().encode('one');
+    server.on('READDIR', (id: number) => {
+      server.name(id, [{
+        filename: 'b.txt',
+        longname: '-rw-r--r--   1 nodejs nodejs 1 Dec  4  2009 b.txt',
+        attrs: { mode: 0o100644, size: 1 },
+      }]);
+    });
+
+    // A one-entry NAME is a list for READDIR, not a path as for REALPATH
+    const list = await client.readdir(handle);
+    assertEquals(list.length, 1);
+    assertEquals(list[0].filename, 'b.txt');
+    assertEquals(list[0].attrs.size, 1);
+  });
+});
+
 Deno.test('SFTP: readdir (full)', async () => {
   await runSFTPTest('readdir', async (client, server) => {
     const handle = new Uint8Array([110, 111, 100, 101, 46, 106, 115]); // "node.js"

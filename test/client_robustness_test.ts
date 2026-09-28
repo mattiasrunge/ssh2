@@ -253,3 +253,21 @@ Deno.test('client: an accepted exec request settles accepted=true', async () => 
   client.end();
   server.close();
 });
+
+Deno.test('client: the ready timeout waits for a slow host verifier', async () => {
+  const { server, host, port } = await startServer((ctx) => ctx.accept(), (conn) => conn.end());
+
+  const client = new Client();
+  await client.connect({
+    host,
+    port,
+    username: 'anna',
+    password: 'x',
+    readyTimeout: 300,
+    // Longer than readyTimeout, as a person answering yes/no would be
+    hostVerifier: () => new Promise((resolve) => setTimeout(() => resolve(true), 600)),
+  });
+
+  client.end();
+  server.close();
+});

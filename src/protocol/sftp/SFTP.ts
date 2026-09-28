@@ -1288,7 +1288,7 @@ export class SFTP extends EventEmitter {
     p += 4;
     buf.set(pathBytes, p);
 
-    this._requests[reqid] = { cb };
+    this._requests[reqid] = { cb, type };
     this._sendOrBuffer(buf);
     this._debug?.(`SFTP: Outbound: Sending ${name}`);
   }
@@ -1314,7 +1314,7 @@ export class SFTP extends EventEmitter {
     p += 4;
     buf.set(handle, p);
 
-    this._requests[reqid] = { cb };
+    this._requests[reqid] = { cb, type };
     this._sendOrBuffer(buf);
     this._debug?.(`SFTP: Outbound: Sending ${name}`);
   }
@@ -1622,12 +1622,13 @@ export class SFTP extends EventEmitter {
     delete this._requests[reqId!];
 
     if (req && typeof req.cb === 'function') {
-      // For realpath/readlink, return just the path
-      if (entries.length === 1 && entries[0].filename) {
-        // Check if callback expects path or entries
-        req.cb(null, entries[0].filename, entries);
-      } else {
+      // READDIR answers a list, however long; REALPATH and READLINK one path.
+      // Deciding by the entry count instead handed readdir of a one-entry
+      // directory the filename string.
+      if (req.type === REQUEST.READDIR) {
         req.cb(null, entries);
+      } else {
+        req.cb(null, entries[0]?.filename, entries);
       }
     }
     return true;
